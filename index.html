@@ -1254,7 +1254,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     return '<span><i style="background:var(--up)"></i>Up candle</span><span><i style="background:var(--down)"></i>Down candle</span>' +
       '<span><i style="background:var(--sma50);height:2px"></i>50-' + per + ' avg</span><span><i style="background:var(--sma200);height:2px"></i>200-' + per + ' avg</span>' +
       '<span><i class="dot-up"></i>Green (up) trigger</span><span><i class="dot-down"></i>Red (down) trigger</span>' +
-      (d ? '<span><i style="background:var(--window);opacity:.35"></i>Est. breakout period</span><span><i style="border-top:2px dashed var(--ink-2);height:0;border-radius:0"></i>Projected move</span>' : "") +
+      (d ? '<span><i style="background:var(--window);opacity:.35"></i>Est. breakout period</span><span><i style="border-top:2px dashed var(--ink-2);height:0;border-radius:0"></i>Projected move</span>' +
+        '<span><i style="border-top:1px dotted var(--up);height:0;border-radius:0"></i>30-day range each day had to beat</span><span>▲▼ Breakout close (hollow = today, not closed yet)</span>' : "") +
       '<span><i style="background:var(--ink-3);opacity:.45"></i>Volume per candle, USD (lower pane)</span>';
   }
   function setTf(tf) {
@@ -1369,9 +1370,21 @@ if (typeof module !== "undefined") module.exports = ENGINE;
         txt(stepS >= DAY ? d.getUTCDate() + " " + MON[d.getUTCMonth()] : String(d.getUTCHours()).padStart(2, "0") + ":00", { x: xx + 3, y: H - 8 });
       }
     }
+    // daily chart: the range each day's close had to beat (high/low of the 30 days before it) and the breakout closes
+    var rng = [], epStart = null;
+    if (daily) {
+      for (i = Math.max(from, 30); i < N; i++) {
+        var rh = -Infinity, rl = Infinity;
+        for (var j = i - 30; j < i; j++) { if (co.h[j] > rh) rh = co.h[j]; if (co.l[j] < rl) rl = co.l[j]; }
+        rng.push({ t: co.ts[i] / 1000, hi: rh, lo: rl, ev: co.c[i] > rh ? 1 : co.c[i] < rl ? -1 : 0, h: co.h[i], l: co.l[i], live: !!co.forming && i === N - 1 });
+      }
+      for (i = rng.length - 1; i >= 0 && !rng[i].ev; i--);          // latest breakout close…
+      if (i >= 0) { epStart = rng[i].t; var dir = rng[i].ev;           // …and back to the first one of that move (gaps up to 3 days)
+        for (var gap = 0, k2 = i - 1; k2 >= 0 && gap <= 3; k2--) { if (rng[k2].ev === dir) { epStart = rng[k2].t; gap = 0; } else gap++; } }
+    }
     if (now) {   // breaking out: mark the breakout candles instead of a window, so the highlight never just disappears
       var bSec = r.modeTf ? TF_SEC[r.modeTf] : DAY;
-      var tB = r.modeTf ? r.barAt - bSec * (r.barsSince + 1)
+      var tB = r.modeTf ? r.barAt - bSec * (r.barsSince + 1) : daily && epStart ? epStart
                         : (daily ? tLast - (forming && !r.provisional ? DAY : 0)                       // as-of candle: today's if provisional
                                  : Math.floor(Date.now() / 1000 / DAY) * DAY - (r.provisional ? 0 : DAY)) - r.days_since_last_breakout * DAY;
       var tE = Math.max(tB + bSec, tLast + barSec);
@@ -1405,6 +1418,23 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       el("line", { x1: xx, x2: xx, y1: y(c.h[i]), y2: y(c.l[i]), stroke: col, "stroke-width": 1 });
       var yt = y(Math.max(c.o[i], c.c[i])), yb = y(Math.min(c.o[i], c.c[i]));
       el("rect", { x: xx - bw / 2, y: yt, width: bw, height: Math.max(1, yb - yt), fill: col, rx: bw > 4 ? 1 : 0 });
+    }
+    if (rng.length) {
+      var ph = "", pl = "";
+      rng.forEach(function (d, q) {
+        var a = x(d.t - DAY / 2), b = x(d.t + DAY / 2);
+        ph += (q ? "L" : "M") + a.toFixed(1) + " " + y(d.hi).toFixed(1) + "L" + b.toFixed(1) + " " + y(d.hi).toFixed(1);
+        pl += (q ? "L" : "M") + a.toFixed(1) + " " + y(d.lo).toFixed(1) + "L" + b.toFixed(1) + " " + y(d.lo).toFixed(1);
+      });
+      el("path", { d: ph, fill: "none", stroke: upC, "stroke-width": 1, "stroke-opacity": 0.5, "stroke-dasharray": "2 2" });
+      el("path", { d: pl, fill: "none", stroke: dnC, "stroke-width": 1, "stroke-opacity": 0.5, "stroke-dasharray": "2 2" });
+      rng.forEach(function (d) {       // ▲ above a close over the 30-day high, ▼ below a close under the 30-day low (hollow = today, not closed yet)
+        if (!d.ev) return;
+        var cx0 = x(d.t), yy = d.ev > 0 ? y(d.h) - 6 : y(d.l) + 6, s5 = 4.5, col2 = d.ev > 0 ? upC : dnC;
+        el("path", { d: d.ev > 0 ? "M" + (cx0 - s5) + " " + (yy - s5) + "L" + (cx0 + s5) + " " + (yy - s5) + "L" + cx0 + " " + yy + "Z"
+                                  : "M" + (cx0 - s5) + " " + (yy + s5) + "L" + (cx0 + s5) + " " + (yy + s5) + "L" + cx0 + " " + yy + "Z",
+          fill: d.live ? "none" : col2, stroke: col2, "stroke-width": 1.2 });
+      });
     }
     var hx = daily ? x(tLast - 30 * DAY) : x(t0);
     function hline(p, color, label) {
