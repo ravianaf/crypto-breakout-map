@@ -1328,6 +1328,19 @@ if (typeof module !== "undefined") module.exports = ENGINE;
         txt(stepS >= DAY ? d.getUTCDate() + " " + MON[d.getUTCMonth()] : String(d.getUTCHours()).padStart(2, "0") + ":00", { x: xx + 3, y: H - 8 });
       }
     }
+    if (now) {   // breaking out: mark the breakout candles instead of a window, so the highlight never just disappears
+      var bSec = r.modeTf ? TF_SEC[r.modeTf] : DAY;
+      var tB = r.modeTf ? r.barAt - bSec * (r.barsSince + 1)
+                        : (daily ? tLast - (forming && !r.provisional ? DAY : 0)                       // as-of candle: today's if provisional
+                                 : Math.floor(Date.now() / 1000 / DAY) * DAY - (r.provisional ? 0 : DAY)) - r.days_since_last_breakout * DAY;
+      var tE = Math.max(tB + bSec, tLast + barSec);
+      if (tE > t0 && tB < t1) {
+        el("rect", { x: x(Math.max(tB, t0)), y: m.t, width: Math.max(3, x(Math.min(tE, t1)) - x(Math.max(tB, t0))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.22 });
+        var blab = "breakout " + (r.status.indexOf("up") >= 0 ? "up" : "down") + " now" + (r.provisional && !r.modeTf ? " · today's candle, confirms at 00:00 UTC" : "");
+        var bl = x(Math.max(tB, t0)) - 4;
+        txt(blab, { x: bl, y: pBot - 6, fill: css("--ink-2"), "text-anchor": bl - blab.length * 7 > m.l ? "end" : "start" });
+      }
+    }
     if (!now && estTs(r, 10) && estTs(r, 90) <= t1 && estTs(r, 10) >= t0) {
       el("rect", { x: x(estTs(r, 10)), y: m.t, width: Math.max(1, x(estTs(r, 90)) - x(estTs(r, 10))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.08 });
       el("rect", { x: x(estTs(r, 25)), y: m.t, width: Math.max(2, x(estTs(r, 75)) - x(estTs(r, 25))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.22 });
