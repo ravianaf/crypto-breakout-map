@@ -173,7 +173,7 @@ td.r, th.r { text-align: right; }
       <div class="filters">
         <input id="q" type="search" placeholder="Search coin, e.g. SOL" autocomplete="off" aria-label="Search coins">
         <select id="fphase" aria-label="Phase"><option value="">All phases</option><option value="bull">Bull</option><option value="sideways">Sideways</option><option value="bear">Bear</option></select>
-        <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
+        <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="today">★ Today's candidates</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
         <select id="sort" aria-label="Sort"><option value="date">Soonest est. breakout</option><option value="near">Closest to a trigger</option><option value="squeeze">Tightest squeeze</option><option value="vol">Highest 24h volume</option><option value="mcap">Largest market cap</option><option value="az">A to Z</option></select>
       </div>
       <div class="listmeta"><span id="shown"></span><span><button id="copy" type="button">Copy list as CSV</button> <span id="copied" class="copied" aria-live="polite"></span></span></div>
@@ -634,7 +634,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     }).then(function (coins) {
       coins.sort(function (a, b) { return a.symbol < b.symbol ? -1 : 1; });
       var out = ENGINE.run(coins);
-      state.coins = out.coins; state.summary = out.summary; state.skipped = syms.length - out.coins.length - (state.failed || 0);
+      state.coins = out.coins; state.summary = out.summary;
+      state.coinBy = {}; out.coins.forEach(function (co) { state.coinBy[co.symbol] = co; }); state.skipped = syms.length - out.coins.length - (state.failed || 0);
       var cbyS = {}; out.coins.forEach(function (co) { cbyS[co.symbol] = co; });
       state.rows = out.rows.map(function (r) {
         var co = cbyS[r.symbol]; r.id = co.id; r.base = co.base; r.pp = co.pp; r.qp = co.qp; r.minUsdt = co.minUsdt; r.chart = co; return r;
@@ -684,6 +685,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       var n = 0;
       state.rows.forEach(function (r) {
         var p = byS[r.symbol]; if (!p) return;
+        if (r.closedStatus === undefined) { r.closedStatus = r.status; r.closedQ = r.days_since_last_breakout; }
         PROV_KEYS.forEach(function (k) { r[k] = p[k]; });
         r.chart = pc[r.symbol]; r.provisional = true; n++;
       });
@@ -789,6 +791,35 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (p < r.down_trigger) return { k: "down", text: "Trading below the down trigger now (" + fmtP(r.down_trigger) + "). A daily close below it at 00:00 UTC confirms the breakdown." };
     return null;
   }
+  /* Today's candidates, in the order the bot would act on them:
+       1 "signal"  broke out at the last daily close and is still within 5% of the breakout level: the bot's
+                   buy for today (it buys at 00:05 UTC when BTC is above its 20-day average)
+       2 "tonight" trading above the green trigger now: a daily close there is tomorrow's signal
+       3 "near"    within 3% under the green trigger and inside its estimated breakout window */
+  function closedStatus(r) { return r.closedStatus !== undefined ? r.closedStatus : r.status; }
+  function closedQ(r) { return r.closedQ !== undefined ? r.closedQ : r.days_since_last_breakout; }
+  function breakoutLevel(r) {          // the 30-day high before the last closed day (what the bot's 5% chase rule uses)
+    var co = state.coinBy && state.coinBy[r.symbol]; if (!co || co.c.length < 32) return null;
+    var k = co.c.length - 1, hi = -Infinity;
+    for (var i = k - 30; i < k; i++) if (co.h[i] > hi) hi = co.h[i];
+    return hi;
+  }
+  function todayTier(r) {
+    var p = livePrice(r);
+    if (closedStatus(r) === "breaking up now" && closedQ(r) === 0) {
+      var lvl = breakoutLevel(r);
+      if (lvl && p / lvl - 1 <= 0.05 && p > (r.up_trigger + r.down_trigger) / 2) return { k: "signal", n: 1, chase: (p / lvl - 1) * 100 };
+    }
+    if (p > r.up_trigger) return { k: "tonight", n: 2 };
+    var today = new Date().toISOString().slice(0, 10);
+    if (r.up_trigger / p - 1 <= 0.03 && r.bo_p10 && r.bo_p10 <= today && (!r.bo_p90 || today <= r.bo_p90)) return { k: "near", n: 3 };
+    return null;
+  }
+  function btcFilter() {
+    var co = state.coinBy && state.coinBy["BTC/USDT"]; if (!co || co.c.length < 21) return null;
+    var c = co.c, n = c.length, avg = 0; for (var i = n - 20; i < n; i++) avg += c[i]; avg /= 20;
+    return { ok: c[n - 1] > avg, close: c[n - 1], avg: avg };
+  }
   // Every status a coin is in right now (a coin can be both "above_up" and "broke_up").
   function statusKey(r) {
     var p = livePrice(r), keys = [];
@@ -799,6 +830,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (r.status === "breaking up now") keys.push("broke_up");
     if (r.status === "breaking down now") keys.push("broke_down");
     if (r.status === "ranging" && p <= r.up_trigger && p >= r.down_trigger) keys.push("ranging");
+    if (todayTier(r)) keys.push("today");
     return keys;
   }
   function nearness(r) { var p = livePrice(r); return Math.min(Math.abs(r.up_trigger / p - 1), Math.abs(p / r.down_trigger - 1)); }
@@ -832,12 +864,20 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     rows.forEach(function (r) { ph[r.phase] = (ph[r.phase] || 0) + 1; if (r.status !== "ranging") now++;
       var ls = liveStatus(r); if (ls && ls.k === "up") up++; if (ls && ls.k === "down") dn++; });
     live = up + dn;
+    var td = { signal: 0, tonight: 0, near: 0 }; rows.forEach(function (r) { var x = todayTier(r); if (x) td[x.k]++; });
+    var bf = btcFilter();
     $("counts").innerHTML = "<span><b>" + rows.length + "</b> coins analysed</span><span><b>" + ph.bull + "</b> bull</span><span><b>" + ph.sideways + "</b> sideways</span><span><b>" +
       ph.bear + "</b> bear</span><span><b>" + now + "</b> broke out in the last 2 days</span><span><b>" + up + "</b> above the green trigger now</span><span><b>" + dn + "</b> below the red trigger now</span><span><b>" + state.skipped + "</b> too new to analyse</span>" +
-      (state.failed ? "<span><b>" + state.failed + "</b> could not be loaded (retrying automatically)</span>" : "");
+      (state.failed ? "<span><b>" + state.failed + "</b> could not be loaded (retrying automatically)</span>" : "") +
+      '<span class="today"><a href="#" id="todaylink"><b>' + (td.signal + td.tonight + td.near) + "</b> today's candidates</a> (" + td.signal + " buy today · " + td.tonight +
+      " above the trigger · " + td.near + " near)" + (bf ? " · market filter " + (bf.ok ? "<b>open</b>" : "<b>closed</b>") + ": BTC " + (bf.ok ? "above" : "below") +
+      " its 20-day average, the bot " + (bf.ok ? "buys" : "skips") + " signals" : "") + "</span>";
   }
   function nextCell(r) {
-    var ls = liveStatus(r);
+    var ls = liveStatus(r), td = $("fstatus").value === "today" ? todayTier(r) : null;
+    if (td) return '<span class="arrow-up" title="' + { signal: "Broke out at the last daily close: today's buy signal (+" + (td.chase || 0).toFixed(1) + "% from the breakout level, max 5%)",
+      tonight: "Above the green trigger now: a daily close here is tomorrow's signal", near: "Within 3% under the trigger, inside its estimated window" }[td.k] + '">' +
+      { signal: "★ buy today", tonight: "★ closes tonight?", near: "★ near" }[td.k] + "</span>";
     return r.status !== "ranging"
       ? '<span class="arrow-' + (r.status.indexOf("up") >= 0 ? "up" : "down") + '">' + (r.status.indexOf("up") >= 0 ? "▲ now" : "▼ now") + "</span>"
       : ls ? '<span class="arrow-' + ls.k + '">' + (ls.k === "up" ? "▲ above" : "▼ below") + "</span>"
@@ -859,6 +899,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       mcap: function (r) { var m = matchCap(r); return -((m && m.mc) || 0); },
       az: function (r) { return r.symbol; }
     }[so];
+    if (fs === "today") key = function (r) { var t = state.tick[r.id]; return todayTier(r).n * 1e15 - ((t && t.vol) || 0); };
     list.sort(function (a, b) { var x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
     return list;
   }
@@ -1418,6 +1459,10 @@ if (typeof module !== "undefined") module.exports = ENGINE;
 
   /* ---------- wiring ---------- */
   ["q", "fphase", "fstatus", "sort"].forEach(function (id) { $(id).addEventListener("input", renderList); });
+  $("counts").addEventListener("click", function (e) {      // "N today's candidates" -> filter the list to them
+    if (!e.target.closest("#todaylink")) return;
+    e.preventDefault(); $("fstatus").value = "today"; renderList();
+  });
   function pick(tr) {
     select(tr.dataset.s);
     if (window.matchMedia("(max-width: 960px)").matches) {   // stacked layout: bring the chart into view
