@@ -214,6 +214,11 @@ td.r, th.r { text-align: right; }
       <dt>50- and 200-day average</dt><dd>Average closing price over the last 50 and 200 days (periods on other timeframes). Used to decide the phase.</dd>
       <dt>Green (up) trigger</dt><dd>The highest price of the last 30 days. A daily close above it is a breakout up. It is also the Entry price in the calculator.</dd>
       <dt>Red (down) trigger</dt><dd>The lowest price of the last 30 days. A daily close below it is a breakdown.</dd>
+      <dt>Green ▲ / red ▼ arrows</dt><dd><b>On the chart</b>: a green ▲ above a candle marks a daily close above the high of the 30 days before it (a breakout up);
+        a red ▼ below a candle marks a close under the 30-day low (a breakdown). Hollow arrows are today's unfinished candle. The dotted green and red steps are that
+        30-day high and low on each day. <b>In the list's Next column</b>: <b>▲ now / ▼ now</b> = broke out up / down at a daily close in the last 2 days;
+        <b>▲ above / ▼ below</b> = trading past a trigger today, not confirmed until the 00:00 UTC close; <b>▲ up / ▼ down</b> = still inside the range, the side the
+        next breakout leans to. <b>★</b> labels appear with the Today's candidates filter (buy today, closes tonight?, near).</dd>
       <dt>Status</dt><dd><b>Above the green / below the red trigger now</b>: the live price is past that level today (confirmed only by the daily close). <b>Within 3%</b>: close to a trigger. <b>Broke out / broke down</b>: a daily close beyond the level in the last 2 days. <b>Inside the range</b>: none of these.</dd>
       <dt>Est. breakout period</dt><dd>The date range in which the next breakout is most likely, from how long this coin's past quiet stretches between breakouts lasted (middle 50% of outcomes). "Most likely" is the middle date; the wide window covers 80%. Shaded on the daily chart.</dd>
       <dt>Lean</dt><dd>Which side the next breakout leans to: bull phase leans up, bear phase leans down, sideways follows the half of the range the price is in. In testing it was right about 55% of the time.</dd>
@@ -1255,7 +1260,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       '<span><i style="background:var(--sma50);height:2px"></i>50-' + per + ' avg</span><span><i style="background:var(--sma200);height:2px"></i>200-' + per + ' avg</span>' +
       '<span><i class="dot-up"></i>Green (up) trigger</span><span><i class="dot-down"></i>Red (down) trigger</span>' +
       (d ? '<span><i style="background:var(--window);opacity:.35"></i>Est. breakout period</span><span><i style="border-top:2px dashed var(--ink-2);height:0;border-radius:0"></i>Projected move</span>' +
-        '<span><i style="border-top:1px dotted var(--up);height:0;border-radius:0"></i>30-day range each day had to beat</span><span>▲▼ Breakout close (hollow = today, not closed yet)</span>' : "") +
+        '<span><i style="border-top:1px dotted var(--up);height:0;border-radius:0"></i>30-day range each day had to beat</span><span><b style="color:var(--up)">▲</b> close above the 30-day high (breakout up) · <b style="color:var(--down)">▼</b> close below the 30-day low (breakdown) · hollow = today, not closed yet</span>' : "") +
       '<span><i style="background:var(--ink-3);opacity:.45"></i>Volume per candle, USD (lower pane)</span>';
   }
   function setTf(tf) {
@@ -1430,9 +1435,9 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       el("path", { d: pl, fill: "none", stroke: dnC, "stroke-width": 1, "stroke-opacity": 0.5, "stroke-dasharray": "2 2" });
       rng.forEach(function (d) {       // ▲ above a close over the 30-day high, ▼ below a close under the 30-day low (hollow = today, not closed yet)
         if (!d.ev) return;
-        var cx0 = x(d.t), yy = d.ev > 0 ? y(d.h) - 6 : y(d.l) + 6, s5 = 4.5, col2 = d.ev > 0 ? upC : dnC;
-        el("path", { d: d.ev > 0 ? "M" + (cx0 - s5) + " " + (yy - s5) + "L" + (cx0 + s5) + " " + (yy - s5) + "L" + cx0 + " " + yy + "Z"
-                                  : "M" + (cx0 - s5) + " " + (yy + s5) + "L" + (cx0 + s5) + " " + (yy + s5) + "L" + cx0 + " " + yy + "Z",
+        var cx0 = x(d.t), yy = d.ev > 0 ? y(d.h) - 4 : y(d.l) + 4, s5 = 4.5, col2 = d.ev > 0 ? upC : dnC;
+        el("path", { d: d.ev > 0 ? "M" + (cx0 - s5) + " " + yy + "L" + (cx0 + s5) + " " + yy + "L" + cx0 + " " + (yy - 1.6 * s5) + "Z"
+                                  : "M" + (cx0 - s5) + " " + yy + "L" + (cx0 + s5) + " " + yy + "L" + cx0 + " " + (yy + 1.6 * s5) + "Z",
           fill: d.live ? "none" : col2, stroke: col2, "stroke-width": 1.2 });
       });
     }
