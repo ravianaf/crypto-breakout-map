@@ -1562,11 +1562,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       txt(label, { x: hx + 2, y: y(p) - 5, fill: css("--ink-2") });
     }
     hline(r.up_trigger, upC, "green trigger (up)"); hline(r.down_trigger, dnC, "red trigger (down)");
-    var startT = now ? tLast : p50;
+    var startT = now ? tLast : p50, proj = [];
     if (daily && startT) {
       var leanUp = now ? r.status.indexOf("up") >= 0 : r.bias === "up";
       [[r.up_trigger, r.up_target, upC, leanUp], [r.down_trigger, r.down_target, dnC, !leanUp]].forEach(function (a) {
         var from = a[0], to = a[1], color = a[2], lean = a[3], xe = x(startT + mv * DAY);
+        proj.push({ from: from, to: to, ta: startT, tb: startT + mv * DAY, up: to > from, lean: lean });
         el("path", { d: "M" + x(startT) + " " + y(from) + "L" + xe + " " + y(to), stroke: color, "stroke-width": lean ? 2 : 1.5, "stroke-dasharray": lean ? "0" : "4 4", "stroke-opacity": lean ? 1 : 0.55, fill: "none" });
         el("circle", { cx: xe, cy: y(to), r: lean ? 5 : 4, fill: color, stroke: css("--panel"), "stroke-width": 2, "fill-opacity": lean ? 1 : 0.55 });
         var ty = to > from ? Math.max(m.t + 11, y(to) - 10) : Math.min(pBot - 18, y(to) + 18);
@@ -1578,10 +1579,32 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     el("circle", { cx: xl, cy: y(live), r: 5, fill: css("--live"), stroke: css("--panel"), "stroke-width": 2 });
     txt("live " + fmtP(live), { x: Math.min(xl + 8, W - m.r - 80), y: y(live) + 4, fill: css("--ink") });
     var cross = el("line", { x1: 0, x2: 0, y1: m.t, y2: H - m.b, stroke: css("--ink-3"), "stroke-width": 1, visibility: "hidden" });
-    var hit = el("rect", { x: m.l, y: m.t, width: Math.max(1, x(tLast) - m.l + step / 2), height: H - m.t - m.b, fill: "transparent" });
+    var hit = el("rect", { x: m.l, y: m.t, width: Math.max(1, W - m.r - m.l), height: H - m.t - m.b, fill: "transparent" });
     var tip = $("tip");
     hit.addEventListener("pointermove", function (ev) {
       var pt = svg.getBoundingClientRect(), sx = (ev.clientX - pt.left) * (W / pt.width);
+      var ti = t0 + (sx - m.l) / (W - m.l - m.r) * (t1 - t0);
+      if (ti > tLast + barSec / 2) {                 // beyond the last candle: the date, and what the chart projects for it
+        var fd = new Date(ti * 1000), fiso = fd.toISOString(), ahead = (ti - Date.now() / 1000) / DAY;
+        var lines = ["<b>" + (barSec >= DAY ? fmtDY(fiso.slice(0, 10)) : fmtD(fiso.slice(0, 10)) + " " + fiso.slice(11, 16) + " UTC") + "</b> · " +
+                     (fiso.slice(0, 10) === new Date().toISOString().slice(0, 10) && barSec >= DAY ? "today (candle still forming)" :
+                      "future" + (ahead >= 1 ? ", in " + Math.round(ahead) + " days" : ahead > 0 ? ", in " + Math.round(ahead * 24) + " h" : ""))];
+        var w10 = estTs(r, 10), w25 = estTs(r, 25), w75 = estTs(r, 75), w90 = estTs(r, 90);
+        if (!now && w10 && ti >= w10 && ti <= w90) lines.push(ti >= w25 && ti <= w75 ? "Inside the main est. breakout window" : "Inside the wide est. breakout window");
+        proj.forEach(function (q) {
+          var arrow = q.up ? "▲" : "▼";
+          if (ti >= q.ta && ti <= q.tb) {
+            var f = (ti - q.ta) / (q.tb - q.ta), pp = q.from * Math.pow(q.to / q.from, f);
+            lines.push(arrow + " projected " + fmtP(Number(pp.toPrecision(4))) + (q.lean ? " (leaning side)" : ""));
+          }
+          var near = Math.abs(sx - x(q.tb)) < 12;
+          if (near || ti > q.tb) lines.push(arrow + " target " + fmtP(Number(q.to.toPrecision(4))) + " typically by " + fmtDY(new Date(q.tb * 1000).toISOString().slice(0, 10)));
+        });
+        cross.setAttribute("x1", sx); cross.setAttribute("x2", sx); cross.setAttribute("visibility", "visible");
+        tip.innerHTML = lines.join("<br>"); tip.hidden = false;
+        tip.style.left = Math.min(pt.width - 210, Math.max(0, sx * (pt.width / W) + 12)) + "px"; tip.style.top = "8px";
+        return;
+      }
       var i = Math.max(0, Math.min(n - 1, Math.round((sx - x(t0)) / step))), xx = x(c.t[i]);
       cross.setAttribute("x1", xx); cross.setAttribute("x2", xx); cross.setAttribute("visibility", "visible");
       var dt = new Date(c.t[i] * 1000), iso = dt.toISOString();
