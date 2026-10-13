@@ -173,8 +173,8 @@ td.r, th.r { text-align: right; }
       <div class="filters">
         <input id="q" type="search" placeholder="Search coin, e.g. SOL" autocomplete="off" aria-label="Search coins">
         <select id="fphase" aria-label="Phase"><option value="">All phases</option><option value="bull">Bull</option><option value="sideways">Sideways</option><option value="bear">Bear</option></select>
-        <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="today">★ Today's candidates</option><option value="t1day">⚡ TP1 likely in 24 hours</option><option value="yellow">📅 Entered yellow zone today</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
-        <select id="sort" aria-label="Sort"><option value="date">Soonest est. breakout</option><option value="near">Closest to a trigger</option><option value="squeeze">Tightest squeeze</option><option value="vol">Highest 24h volume</option><option value="mcap">Largest market cap</option><option value="az">A to Z</option></select>
+        <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="today">★ Today's candidates</option><option value="t1day">⚡ TP1 likely in 24 hours</option><option value="t2day">⚡ TP2 likely in 24 hours</option><option value="t3day">⚡ TP3 likely in 24 hours</option><option value="reclaim">🔄 Red-line reclaim (bear-trap check)</option><option value="yellow">📅 Entered yellow zone today</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
+        <select id="sort" aria-label="Sort"><option value="date">Soonest est. breakout</option><option value="near">Closest to a trigger</option><option value="squeeze">Tightest squeeze</option><option value="vol">Highest 24h volume</option><option value="mcap">Largest market cap</option><option value="price">Highest price</option><option value="az">A to Z</option></select>
       </div>
       <div class="listmeta"><span id="shown"></span><span><button id="copy" type="button">Copy list as CSV</button> <span id="copied" class="copied" aria-live="polite"></span></span></div>
       <div class="tablebox">
@@ -224,6 +224,13 @@ td.r, th.r { text-align: right; }
         test on all coins (about a year) coins entering it broke down more often than up and averaged −2.7% over the next 14 days. The buy is a daily close
         above the green trigger, which the bot reports at 00:05 UTC. The yellow strip over a coin that is <i>already</i> breaking out marks the breakout
         candles, which is why it often sits on a rally.</dd>
+      <dt>⚡ TP2 / TP3 likely in 24 hours</dt><dd>The same idea as TP1 for the second and third take-profit, each with its own model fitted on past
+        breakouts and checked on unseen data (coins given 50%+ reached TP2 87% and TP3 95% of the time). Such fast moves are rare: within a day only
+        13% of breakouts touch TP2 and 6.5% TP3, so these lists are usually short. A touch is not a hold: a sell order must wait at that level.</dd>
+      <dt>🔄 Red-line reclaim (bear-trap check)</dt><dd>Coins that closed below their red trigger (30-day low) in the last 5 days and have now closed back above
+        that level, the classic "bear trap". <b>Tested on all coins (about a year): this did not lead to rallies on average</b>: the next 14 days
+        averaged −1.6% (about 40% higher), worse than a random day (−0.7%), and reclaims on heavy volume did worse (−3.6%). A watch list for you to judge,
+        not a buy signal.</dd>
       <dt>⚡ TP1 likely in 24 hours</dt><dd>Today's breakout coins (bought today or above the trigger now) with at least a 40% historical chance of touching
         Target 1 within the next 24 hours. The chance comes from 2,393 past daily breakouts: the closer Target 1 is and the higher the breakout-day volume
         (vs the 20-day average), the likelier the touch; the first breakout of a move does a little better than a repeat. Checked on unseen data
@@ -835,7 +842,21 @@ if (typeof module !== "undefined") module.exports = ENGINE;
      correctly (predicted 50-65% -> 75% actual, 65%+ -> 90%). Inputs: distance to Target 1, breakout-day volume
      vs the 20-day average, first breakout of a move. Touching Target 1 is not holding it: the next day's close
      averaged about 0%, so the profit is in a sell order waiting at Target 1. */
-  function t1Chance(r) {
+  // logistic coefficients [const, log distance %, log volume ratio, first breakout] per take-profit, fitted on
+  // daily breakout closes (all coins, ~1 year). On the unseen half: TP2 predicted 35-50% -> 59% actual, 50%+ -> 87%;
+  // TP3 predicted 35-50% -> 40%, 50%+ -> 95%. TP2 / TP3 touches within a day are rare (13% / 6.5% of breakouts).
+  var TP_MODEL = { 1: [0.2846, -1.0625, 0.6429, 0.38], 2: [0.4262, -1.2864, 0.7157, 0.213], 3: [0.3124, -1.5202, 0.8171, 0.7193] };
+  function t1Chance(r) { return tpChance(r, 1); }
+  function tpChance(r, n) {
+    state.tpCache = state.tpCache || {};
+    var ck = r.symbol + "|" + n + "|" + livePrice(r), hit = state.tpCache[ck];
+    if (hit !== undefined) return hit;
+    var res = tpChanceCalc(r, n);
+    if (Object.keys(state.tpCache).length > 5000) state.tpCache = {};
+    state.tpCache[ck] = res;
+    return res;
+  }
+  function tpChanceCalc(r, n) {
     var td = todayTier(r); if (!td || td.k === "near") return null;
     var co = state.coinBy && state.coinBy[r.symbol]; if (!co || co.c.length < 52) return null;
     var p = livePrice(r), k = co.c.length - 1, H, L, i, volDay, first = 1;
@@ -849,16 +870,25 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       volDay = (state.tick[r.id] || {}).vol || 0;
       if (closedStatus(r) !== "ranging") first = 0;
     }
-    var t1 = H * Math.pow(H / L, 1 / 3), avg = 0;
+    var t1 = H * Math.pow(H / L, n / 3), avg = 0, w = TP_MODEL[n];      // TPn on a log scale (n = 3: H^2 / L)
     for (i = k - 20; i < k; i++) avg += co.v[i]; avg /= 20;
     if (!(t1 > p) || !(avg > 0) || !(volDay > 0)) return null;
     var dist = (t1 / p - 1) * 100, volx = volDay / avg;
-    var z = 0.2846 - 1.0625 * Math.log(Math.min(100, Math.max(0.3, dist))) + 0.6429 * Math.log(Math.min(50, Math.max(0.1, volx))) + 0.38 * first;
-    return { p: 1 / (1 + Math.exp(-z)), t1: t1, dist: dist, volx: volx };
+    var z = w[0] + w[1] * Math.log(Math.min(300, Math.max(0.3, dist))) + w[2] * Math.log(Math.min(50, Math.max(0.1, volx))) + w[3] * first;
+    return { p: 1 / (1 + Math.exp(-z)), t1: t1, dist: dist, volx: volx, n: n };
   }
   // the coin's estimated breakout window (the darker yellow band) opens today. Watch list, not a buy: in the
   // 2026-10-13 test, coins entering it broke down more often than up and averaged -2.7% over the next 14 days.
   function enteredYellow(r) { return r.status === "ranging" && r.bo_p25 === new Date().toISOString().slice(0, 10); }
+  function redReclaim(r) {
+    var co = state.coinBy && state.coinBy[r.symbol]; if (!co || co.c.length < 40) return null;
+    var k = co.c.length - 1;
+    for (var j = k - 1; j >= k - 5; j--) {
+      var lo = Infinity; for (var i = j - 30; i < j; i++) if (co.l[i] < lo) lo = co.l[i];
+      if (co.c[j] < lo && co.c[k] > lo && co.c[k - 1] <= lo && livePrice(r) > lo) return { level: lo, daysAgo: k - j };   // and still above it now
+    }
+    return null;
+  }
   function btcFilter() {
     var co = state.coinBy && state.coinBy["BTC/USDT"]; if (!co || co.c.length < 21) return null;
     var c = co.c, n = c.length, avg = 0; for (var i = n - 20; i < n; i++) avg += c[i]; avg /= 20;
@@ -876,6 +906,9 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (r.status === "ranging" && p <= r.up_trigger && p >= r.down_trigger) keys.push("ranging");
     if (todayTier(r)) keys.push("today");
     var tc = t1Chance(r); if (tc && tc.p >= 0.4) keys.push("t1day");
+    var tc2 = tpChance(r, 2); if (tc2 && tc2.p >= 0.4) keys.push("t2day");
+    var tc3 = tpChance(r, 3); if (tc3 && tc3.p >= 0.4) keys.push("t3day");
+    if (redReclaim(r)) keys.push("reclaim");
     if (enteredYellow(r)) keys.push("yellow");
     return keys;
   }
@@ -912,13 +945,15 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     live = up + dn;
     var td = { signal: 0, tonight: 0, near: 0 }, t1n = 0;
     var yn = 0;
-    rows.forEach(function (r) { var x = todayTier(r); if (x) td[x.k]++; var tc = t1Chance(r); if (tc && tc.p >= 0.4) t1n++; if (enteredYellow(r)) yn++; });
+    var t2n = 0, t3n = 0, rcn = 0;
+    rows.forEach(function (r) { var x = todayTier(r); if (x) td[x.k]++; var tc = t1Chance(r); if (tc && tc.p >= 0.4) t1n++; if (enteredYellow(r)) yn++;
+      var a2 = tpChance(r, 2); if (a2 && a2.p >= 0.4) t2n++; var a3 = tpChance(r, 3); if (a3 && a3.p >= 0.4) t3n++; if (redReclaim(r)) rcn++; });
     var bf = btcFilter();
     $("counts").innerHTML = "<span><b>" + rows.length + "</b> coins analysed</span><span><b>" + ph.bull + "</b> bull</span><span><b>" + ph.sideways + "</b> sideways</span><span><b>" +
       ph.bear + "</b> bear</span><span><b>" + now + "</b> broke out in the last 2 days</span><span><b>" + up + "</b> above the green trigger now</span><span><b>" + dn + "</b> below the red trigger now</span><span><b>" + state.skipped + "</b> too new to analyse</span>" +
       (state.failed ? "<span><b>" + state.failed + "</b> could not be loaded (retrying automatically)</span>" : "") +
       '<span class="today"><a href="#" id="todaylink"><b>' + (td.signal + td.tonight + td.near) + "</b> today's candidates</a> (" + td.signal + " buy today · " + td.tonight +
-      " above the trigger · " + td.near + " near) · <a href='#' id='t1link'><b>" + t1n + "</b> TP1 likely in 24 hours</a> · <a href='#' id='ylink'><b>" + yn + "</b> entered yellow zone today</a>" + (bf ? " · market filter " + (bf.ok ? "<b>open</b>" : "<b>closed</b>") + ": BTC " + (bf.ok ? "above" : "below") +
+      " above the trigger · " + td.near + " near) · <a href='#' id='t1link'><b>" + t1n + "</b> TP1</a> · <a href='#' id='t2link'><b>" + t2n + "</b> TP2</a> · <a href='#' id='t3link'><b>" + t3n + "</b> TP3</a> likely in 24 hours · <a href='#' id='rclink'><b>" + rcn + "</b> red-line reclaims</a> · <a href='#' id='ylink'><b>" + yn + "</b> entered yellow zone today</a>" + (bf ? " · market filter " + (bf.ok ? "<b>open</b>" : "<b>closed</b>") + ": BTC " + (bf.ok ? "above" : "below") +
       " its 20-day average, the bot " + (bf.ok ? "buys" : "skips") + " signals" : "") + "</span>";
   }
   function nextCell(r) {
@@ -926,6 +961,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if ($("fstatus").value === "yellow" && enteredYellow(r))
       return '<span class="arrow-' + r.bias + '" title="Breakout window ' + fmtRange(r.bo_p25, r.bo_p75) + '. Buy only on a daily close above ' + fmtP(r.up_trigger) +
         '">📅 lean ' + (r.bias === "up" ? "▲" : "▼") + " · to " + fmtD(r.bo_p75) + "</span>";
+    var fsv = $("fstatus").value;
+    if (fsv === "reclaim") { var rc = redReclaim(r);
+      if (rc) return '<span class="arrow-up" title="Closed below its 30-day low ' + fmtP(rc.level) + " " + rc.daysAgo + ' day(s) ago and closed back above it. Tested on all coins: no rally on average (14-day return -1.6% vs -0.7% for any day).">🔄 back above ' + fmtP(rc.level) + "</span>"; }
+    if (fsv === "t2day" || fsv === "t3day") { var tcn = tpChance(r, +fsv[1]);
+      if (tcn) return '<span class="arrow-up" title="TP' + tcn.n + " " + fmtP(tcn.t1) + " is " + tcn.dist.toFixed(1) + "% away; breakout volume " + tcn.volx.toFixed(1) +
+        '× the 20-day average. Historical chance to touch it within 24 hours.">⚡ ' + Math.round(tcn.p * 100) + "% · TP" + tcn.n + " +" + tcn.dist.toFixed(1) + "%</span>"; }
     if ($("fstatus").value === "t1day") { var tc = t1Chance(r);
       if (tc) return '<span class="arrow-up" title="Target 1 ' + fmtP(tc.t1) + " is " + tc.dist.toFixed(1) + "% away; breakout volume " + tc.volx.toFixed(1) +
         '× the 20-day average. Historical chance to touch it within 24 hours.">⚡ ' + Math.round(tc.p * 100) + "% · TP1 +" + tc.dist.toFixed(1) + "%</span>"; }
@@ -951,9 +992,11 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       squeeze: function (r) { return isFinite(r.squeeze_pctile) ? r.squeeze_pctile : 999; },
       vol: function (r) { var t = state.tick[r.id]; return -((t && t.vol) || 0); },
       mcap: function (r) { var m = matchCap(r); return -((m && m.mc) || 0); },
+      price: function (r) { return -(livePrice(r) || 0); },
       az: function (r) { return r.symbol; }
     }[so];
-    if (fs === "t1day") key = function (r) { return -t1Chance(r).p; };
+    if (fs === "t1day" || fs === "t2day" || fs === "t3day") { var tn = +fs[1]; key = function (r) { return -tpChance(r, tn).p; }; }
+    else if (fs === "reclaim") key = function (r) { var t = state.tick[r.id]; return -((t && t.vol) || 0); };
     else if (fs === "yellow") key = function (r) { var t = state.tick[r.id]; return -((t && t.vol) || 0); };
     else if (fs === "today") key = function (r) { var t = state.tick[r.id]; return todayTier(r).n * 1e15 - ((t && t.vol) || 0); };
     list.sort(function (a, b) { var x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
@@ -1546,8 +1589,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   /* ---------- wiring ---------- */
   ["q", "fphase", "fstatus", "sort"].forEach(function (id) { $(id).addEventListener("input", renderList); });
   $("counts").addEventListener("click", function (e) {      // "N today's candidates" -> filter the list to them
-    var a = e.target.closest("#todaylink, #t1link, #ylink"); if (!a) return;
-    e.preventDefault(); $("fstatus").value = { t1link: "t1day", ylink: "yellow" }[a.id] || "today"; renderList();
+    var a = e.target.closest("#todaylink, #t1link, #t2link, #t3link, #rclink, #ylink"); if (!a) return;
+    e.preventDefault(); $("fstatus").value = { t1link: "t1day", t2link: "t2day", t3link: "t3day", rclink: "reclaim", ylink: "yellow" }[a.id] || "today"; renderList();
   });
   function pick(tr) {
     select(tr.dataset.s);
