@@ -174,7 +174,7 @@ td.r, th.r { text-align: right; }
         <input id="q" type="search" placeholder="Search coin, e.g. SOL" autocomplete="off" aria-label="Search coins">
         <select id="fphase" aria-label="Phase"><option value="">All phases</option><option value="bull">Bull</option><option value="sideways">Sideways</option><option value="bear">Bear</option></select>
         <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="today">★ Today's candidates</option><option value="t1day">⚡ TP1 likely in 24 hours</option><option value="t2day">⚡ TP2 likely in 24 hours</option><option value="t3day">⚡ TP3 likely in 24 hours</option><option value="reclaim">🔄 Red-line reclaim (bear-trap check)</option><option value="yellow">📅 Entered yellow zone today</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
-        <select id="sort" aria-label="Sort"><option value="date">Soonest est. breakout</option><option value="near">Closest to a trigger</option><option value="squeeze">Tightest squeeze</option><option value="vol">Highest 24h volume</option><option value="mcap">Largest market cap</option><option value="price">Highest price</option><option value="az">A to Z</option></select>
+        <select id="sort" aria-label="Sort"><option value="date">Soonest est. breakout</option><option value="near">Closest to a trigger</option><option value="green">Closest to green trigger</option><option value="yellow">Closest to yellow zone</option><option value="squeeze">Tightest squeeze</option><option value="vol">Highest 24h volume</option><option value="mcap">Largest market cap</option><option value="price">Highest price</option><option value="az">A to Z</option></select>
       </div>
       <div class="listmeta"><span id="shown"></span><span><button id="copy" type="button">Copy list as CSV</button> <span id="copied" class="copied" aria-live="polite"></span></span></div>
       <div class="tablebox">
@@ -224,6 +224,10 @@ td.r, th.r { text-align: right; }
         test on all coins (about a year) coins entering it broke down more often than up and averaged −2.7% over the next 14 days. The buy is a daily close
         above the green trigger, which the bot reports at 00:05 UTC. The yellow strip over a coin that is <i>already</i> breaking out marks the breakout
         candles, which is why it often sits on a rally.</dd>
+      <dt>Sort: closest to green trigger / yellow zone</dt><dd><b>Closest to green trigger</b> orders coins still below their green trigger by how far the
+        price has to rise to reach it (shown as "▲ 2.3% to go"); coins already above it come last. A daily close above the trigger is the breakout signal.
+        <b>Closest to yellow zone</b> orders coins in their range by how many days until their estimated breakout window opens ("📅 in 3 d"; "in zone" when
+        it is open). Both are watch lists; the window predicts timing, not direction.</dd>
       <dt>⚡ TP2 / TP3 likely in 24 hours</dt><dd>The same idea as TP1 for the second and third take-profit, each with its own model fitted on past
         breakouts and checked on unseen data (coins given 50%+ reached TP2 87% and TP3 95% of the time). Such fast moves are rare: within a day only
         13% of breakouts touch TP2 and 6.5% TP3, so these lists are usually short. A touch is not a hold: a sell order must wait at that level.</dd>
@@ -437,7 +441,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   var $ = function (id) { return document.getElementById(id); };
   var NS = "http://www.w3.org/2000/svg", DAY = 86400, DAYMS = 864e5, HIST = 420, LIST_REFRESH_MS = 10 * 1000;
   var API = "https://api.bitget.com/api/v2/spot";
-  var STABLES = ["USDC","FDUSD","TUSD","DAI","USDD","PYUSD","USDE","BUSD","EUR","EURT","USTC","USDP","GUSD","FRAX","LUSD","GHO","USD1","RLUSD","USDS","USDG","EURC","USDT","BFUSD","USDF"];
+  var STABLES = ["USAT","U","USDC","FDUSD","TUSD","DAI","USDD","PYUSD","USDE","BUSD","EUR","EURT","USTC","USDP","GUSD","FRAX","LUSD","GHO","USD1","RLUSD","USDS","USDG","EURC","USDT","BFUSD","USDF"];
   var state = { coins: [], rows: [], byS: {}, summary: null, tick: {}, bn: {}, cg: {}, sel: null, lastRefresh: 0, asOf: null, skipped: 0, busy: false };
 
   /* ---------- formatting ---------- */
@@ -889,6 +893,14 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     }
     return null;
   }
+  // days until the estimated breakout window (darker yellow band) opens: 0 inside it; coins breaking out now or
+  // without a window go last
+  function yellowDays(r) {
+    if (r.status !== "ranging" || !r.bo_p25) return 1e6;
+    var today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+    var a = (Date.parse(r.bo_p25 + "T00:00:00Z") - today) / DAYMS, b = (Date.parse(r.bo_p75 + "T00:00:00Z") - today) / DAYMS;
+    return a > 0 ? a : b >= 0 ? 0 : 1e5;                     // window already over: after the others
+  }
   function btcFilter() {
     var co = state.coinBy && state.coinBy["BTC/USDT"]; if (!co || co.c.length < 21) return null;
     var c = co.c, n = c.length, avg = 0; for (var i = n - 20; i < n; i++) avg += c[i]; avg /= 20;
@@ -961,7 +973,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if ($("fstatus").value === "yellow" && enteredYellow(r))
       return '<span class="arrow-' + r.bias + '" title="Breakout window ' + fmtRange(r.bo_p25, r.bo_p75) + '. Buy only on a daily close above ' + fmtP(r.up_trigger) +
         '">📅 lean ' + (r.bias === "up" ? "▲" : "▼") + " · to " + fmtD(r.bo_p75) + "</span>";
-    var fsv = $("fstatus").value;
+    var fsv = $("fstatus").value, srt = $("sort").value;
+    if (!fsv && srt === "green") { var gd = (r.up_trigger / livePrice(r) - 1) * 100;
+      return gd >= 0 ? '<span class="arrow-up" title="Green trigger ' + fmtP(r.up_trigger) + '">▲ ' + gd.toFixed(1) + "% to go</span>"
+                     : '<span class="arrow-up">▲ above</span>'; }
+    if (!fsv && srt === "yellow") { var yd = yellowDays(r);
+      if (yd < 1e5) return '<span class="arrow-' + r.bias + '" title="Window ' + fmtRange(r.bo_p25, r.bo_p75) + '">📅 ' + (yd === 0 ? "in zone" : "in " + Math.round(yd) + " d") + "</span>"; }
     if (fsv === "reclaim") { var rc = redReclaim(r);
       if (rc) return '<span class="arrow-up" title="Closed below its 30-day low ' + fmtP(rc.level) + " " + rc.daysAgo + ' day(s) ago and closed back above it. Tested on all coins: no rally on average (14-day return -1.6% vs -0.7% for any day).">🔄 back above ' + fmtP(rc.level) + "</span>"; }
     if (fsv === "t2day" || fsv === "t3day") { var tcn = tpChance(r, +fsv[1]);
@@ -993,6 +1010,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       vol: function (r) { var t = state.tick[r.id]; return -((t && t.vol) || 0); },
       mcap: function (r) { var m = matchCap(r); return -((m && m.mc) || 0); },
       price: function (r) { return -(livePrice(r) || 0); },
+      green: function (r) { var d = r.up_trigger / livePrice(r) - 1; return d >= 0 ? d : 1e6 - d; },     // below the trigger, nearest first; already above last
+      yellow: function (r) { return yellowDays(r); },
       az: function (r) { return r.symbol; }
     }[so];
     if (fs === "t1day" || fs === "t2day" || fs === "t3day") { var tn = +fs[1]; key = function (r) { return -tpChance(r, tn).p; }; }
