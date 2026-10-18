@@ -1080,7 +1080,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       (state.mode !== "1D" ? '<div class="alert' + (STRATS[state.mode].tone === "warn" ? " warn15" : "") + '"><b>' + (STRATS[state.mode].name || state.mode) + " breakout</b> (" + STRATS[state.mode].adj + " range): " +
         STRATS[state.mode].test + ". The 1D (30-day) strategy is the main one and the one the Telegram bot trades." + (modeWait ? " <i>" + modeWait + "</i>" : "") + "</div>" : "") +
       '<div class="tfbar" role="group" aria-label="Chart timeframe"><span>Candles</span>' +
-        TFS.map(function (k) { return '<button type="button" class="tf" data-tf="' + k + '" aria-pressed="' + (k === state.tf) + '">' + k + "</button>"; }).join("") +
+        TFS.map(function (k) { return '<button type="button" class="tf" data-tf="' + k + '" aria-pressed="' + (k === tfName(state.tf)) + '">' + k + "</button>"; }).join("") +
         '<small>' + tfNote() + "</small></div>" +
       '<div class="legend" aria-hidden="true" id="legend">' + legendHtml() + "</div>" +
       '<div class="chartbox"><svg id="chart" role="img" aria-label="Price chart for ' + esc(r.symbol) + ' with breakout levels, projection and volume"></svg><div class="tip" id="tip" hidden></div></div>' +
@@ -1298,7 +1298,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
      window 42% / 50% / 51% of the time on 15m / 1h / 4h (ideal 50%) and inside the wide window 72% / 77% / 80%
      (ideal 80%). A single coin's own 1000 candles hold too few stretches (55-71% inside the wide window). */
   function tfNote() {
-    var sm = state.mode === "1D" ? "the daily (1D)" : "the " + state.mode;
+    var sm = state.mode === "1D" ? "the daily 1D (30d)" : "the " + ((STRATS[state.mode] || {}).name || state.mode);
     return state.tf === state.mode ? "Levels and estimate from " + sm + " strategy." : "Levels and estimate below come from " + sm + " strategy.";
   }
   var TF_MIN_STRETCH = 3;              // the engine's MIN_STRETCH (that script has its own scope)
@@ -1389,7 +1389,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   }, 60 * 1000);
   setInterval(function () { var r = state.byS[state.sel]; if (r && state.tf !== "1D" && document.visibilityState === "visible") loadTf(r, true); }, 60 * 1000);
   function legendHtml() {
-    var d = state.tf === "1D", per = d ? "day" : "period";
+    var d = state.tf === "1D", per = TF_SEC[state.tf] === 86400 ? "day" : "period";
     return '<span><i style="background:var(--up)"></i>Up candle</span><span><i style="background:var(--down)"></i>Down candle</span>' +
       '<span><i style="background:var(--sma50);height:2px"></i>50-' + per + ' avg</span><span><i style="background:var(--sma200);height:2px"></i>200-' + per + ' avg</span>' +
       '<span><i class="dot-up"></i>Green (up) trigger</span><span><i class="dot-down"></i>Red (down) trigger</span>' +
