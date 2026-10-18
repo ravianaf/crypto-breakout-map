@@ -143,6 +143,11 @@ td.r, th.r { text-align: right; }
 .livepx b { color: var(--ink); }
 .sigcard { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 8px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .sigcard pre { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; min-width: 0; }
+  .planttl { display: flex; align-items: center; gap: 10px; }
+  .coinicon { width: 28px; height: 28px; border-radius: 50%; flex: none; object-fit: cover; background: var(--panel-2, rgba(127,127,127,.15)); }
+  .coinwrap { position: relative; width: 28px; height: 28px; flex: none; }
+  .coinwrap img { position: absolute; inset: 0; }
+  .coinletter { display: inline-grid; place-items: center; font-size: 14px; font-weight: 700; color: var(--ink-2, inherit); }
 </style>
 </head>
 <body>
@@ -209,7 +214,7 @@ td.r, th.r { text-align: right; }
     <h2 id="d-h">What every number means</h2>
     <dl class="defs">
       <dt>Phase</dt><dd>The coin's market cycle on daily candles. <b>Bull</b>: price is above its 50-day average, which is above its 200-day average and rising. <b>Bear</b>: the mirror image. <b>Sideways</b>: anything else, labelled "after decline" (possible accumulation) or "after rise" (possible distribution).</dd>
-      <dt>Strategy timeframe</dt><dd>The same breakout rules on 15m, 1h, 4h, 1D or 1W candles, each with its own range: 48 hours on 15m, 5 days on 1h, 7 days on 4h, 30 days on 1D and 26 weeks on 1W. <b>1D · 20d</b> is the daily strategy with a 20-day range instead of 30: it enters earlier with a tighter stop and tested better (Mar–Oct 2026: +2.46% per trade vs +1.65%), but over a full year both lost money; the Telegram bot follows it as a silent live test. <b>1D is the main strategy</b>: tested over a full year and traded by the Telegram bot. In a 7-month test (449 coins, Mar–Oct 2026) 1h and 4h were positive in both halves, 15m lost money because fees eat its small moves, and 1W has too little history to test. The coin list always uses the daily levels.</dd>
+      <dt>Strategy timeframe</dt><dd>The same breakout rules on 15m, 1h, 4h, 1D or 1W candles, each with its own range: 48 hours on 15m, 5 days on 1h, 7 days on 4h, 30 days on 1D and 26 weeks on 1W. <b>1D (20d)</b> is the daily strategy with a 20-day range instead of 30: it enters earlier with a tighter stop and tested better (Mar–Oct 2026: +2.46% per trade vs +1.65%), but over a full year both lost money; the Telegram bot follows it as a silent live test. <b>1D (30d) is the main strategy</b>: tested over a full year and traded by the Telegram bot. In a 7-month test (449 coins, Mar–Oct 2026) 1h and 4h were positive in both halves, 15m lost money because fees eat its small moves, and 1W has too little history to test. The coin list always uses the daily levels.</dd>
       <dt>Candles</dt><dd>Each bar is one period: green if it closed higher than it opened, red if lower. The 15m, 1h, 4h and 1W buttons change the view; the analysis itself always uses daily (1D) candles, closing at 00:00 UTC.</dd>
       <dt>50- and 200-day average</dt><dd>Average closing price over the last 50 and 200 days (periods on other timeframes). Used to decide the phase.</dd>
       <dt>Green (up) trigger</dt><dd>The highest price of the last 30 days. A daily close above it is a breakout up. It is also the Entry price in the calculator.</dd>
@@ -602,19 +607,19 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     state.cg = by;
   }
   function loadMarketCaps(onPage) {
-    return kvGet("coingecko").then(function (cached) {
+    return kvGet("coingecko2").then(function (cached) {
       if (cached && Date.now() - cached.at < 12 * 3600e3) { indexCaps(cached.list); return; }
       var list = [], page = 1;
       function step() {   // 8 pages of 250 (top 2,000); the free API allows a few calls a minute, so pace them
         if (page > 8) return Promise.resolve();
         return getJSON("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=" + page, 2)
           .then(function (b) {
-            (b || []).forEach(function (x) { list.push({ s: x.symbol, n: x.name, p: x.current_price, mc: x.market_cap, r: x.market_cap_rank, f: x.fully_diluted_valuation }); });
+            (b || []).forEach(function (x) { list.push({ s: x.symbol, n: x.name, p: x.current_price, mc: x.market_cap, r: x.market_cap_rank, f: x.fully_diluted_valuation, i: x.image }); });
             indexCaps(list); onPage && onPage();
             page++; return new Promise(function (res) { setTimeout(res, 2500); }).then(step);
           });
       }
-      return step().catch(function () {}).then(function () { if (list.length) kvSet("coingecko", { list: list, at: Date.now() }); });
+      return step().catch(function () {}).then(function () { if (list.length) kvSet("coingecko2", { list: list, at: Date.now() }); });
     });
   }
   function matchCap(r) {
@@ -623,6 +628,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       if (price && x.p && Math.abs(x.p / price - 1) <= 0.10 && (!best || (x.mc || 0) > (best.mc || 0))) best = x;
     });
     return best;
+  }
+  function coinIcon(r) {        // CoinGecko logo when the coin is matched, else a letter badge
+    var m = matchCap(r), src = m && m.i ? String(m.i).replace("/large/", "/small/") : "";
+    var letter = '<span class="coinicon coinletter" aria-hidden="true">' + esc(r.base.charAt(0)) + "</span>";
+    if (!src || !/^https:\/\//.test(src)) return letter;
+    return '<span class="coinwrap">' + letter + '<img class="coinicon" src="' + esc(src) + '" alt="" width="28" height="28" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>';
   }
   function livePrice(r) { var t = state.tick[r.id]; return t && t.last ? t.last : r.close; }
 
@@ -1065,7 +1076,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       '<span class="check">' + r.days_since_last_breakout + " days since last breakout · squeeze tighter than " + pct(100 - r.squeeze_pctile) + " of the past year</span></div>" +
       '<div class="alert" id="livealert"' + (ls ? "" : " hidden") + ">" + (ls ? ls.text : "") + "</div>" +
       '<div class="modebar" role="group" aria-label="Strategy timeframe"><span>Strategy</span>' +
-        STRAT_ORDER.map(function (k) { return '<button type="button" class="mode" data-mode="' + k + '" aria-pressed="' + (state.mode === k) + '">' + (k === "1D" ? "1D (main)" : k === "1D20" ? "1D · 20d" : k) + "</button>"; }).join("") + "</div>" +
+        STRAT_ORDER.map(function (k) { return '<button type="button" class="mode" data-mode="' + k + '" aria-pressed="' + (state.mode === k) + '">' + (k === "1D" ? "1D (30d)" : k === "1D20" ? "1D (20d)" : k) + "</button>"; }).join("") + "</div>" +
       (state.mode !== "1D" ? '<div class="alert' + (STRATS[state.mode].tone === "warn" ? " warn15" : "") + '"><b>' + (STRATS[state.mode].name || state.mode) + " breakout</b> (" + STRATS[state.mode].adj + " range): " +
         STRATS[state.mode].test + ". The 1D (30-day) strategy is the main one and the one the Telegram bot trades." + (modeWait ? " <i>" + modeWait + "</i>" : "") + "</div>" : "") +
       '<div class="tfbar" role="group" aria-label="Chart timeframe"><span>Candles</span>' +
@@ -1160,7 +1171,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (P.tooSmall) warn.push("At this account size and risk the order is below the exchange minimum of " + (r.minUsdt || 1) + " USDT.");
     if (P.capped) warn.push("Size capped at your whole account; the stop is wide relative to your risk setting, so actual risk is " + fmtUsd(P.riskUsd) + ".");
     return '<section class="plan" aria-labelledby="plan-h">' +
-      '<div class="planhead"><h3 id="plan-h">Trade plan (spot)</h3>' +
+      '<div class="planhead"><h3 id="plan-h" class="planttl">' + coinIcon(r) + esc(r.base) + ' trade plan (spot)</h3>' +
       '<div class="sizing"><label for="acct">Account (USDT)</label><input id="acct" type="number" min="1" step="1" value="' + SIZING.acct + '">' +
       '<label for="riskp">Risk per trade (%)</label><input id="riskp" type="number" min="0.1" max="100" step="0.1" value="' + SIZING.risk + '"></div></div>' +
       '<div class="livepx" id="livepx" aria-live="polite">' + livePxHtml(r, P) + "</div>" +
@@ -1264,7 +1275,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     /* 1D with a 20-day range (2026-10-15, run_breakout_box_length_test.py / run_breakout_box20_report.py): earlier entries,
        tighter stops; beat the 30-day range in every test but, like it, lost money over a full year of daily candles.
        The Telegram bot follows it silently as a live test (book tracked_box20). Time exit stays 30 days, as tested. */
-    "1D20": { box: 20, span: "20 days", adj: "20-day", bars: "20 × 1D", cdl: "1D", name: "1D · 20-day", exit: "30 days",
+    "1D20": { box: 20, span: "20 days", adj: "20-day", bars: "20 × 1D", cdl: "1D", name: "1D (20d)", exit: "30 days",
       test: "tested better than the 30-day range (about 440 coins, BTC filter on, 0.3% costs). Mar–Oct 2026 on hourly prices: 1,137 trades, 47% won, " +
         "+2.46% per trade (+1.51% without the 10 biggest wins) vs +1.65% (+0.27%) for 30 days; TP3 reached 35% vs 26%, stops about −11.5% vs −13.6%. " +
         "Over a full year of daily candles both lost money (−1.05% vs −1.49% per trade), so it works only in rising markets. " +
