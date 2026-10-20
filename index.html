@@ -139,6 +139,14 @@ td.r, th.r { text-align: right; }
 .defs dt { font-weight: 600; color: var(--ink); } .defs dd { margin: 0; }
 @media (max-width: 640px) { .defs { grid-template-columns: minmax(0, 1fr); } .defs dd { margin-bottom: 6px; } }
 .howto { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.mfbar { border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; background: var(--panel); color: var(--ink-2); }
+.mfbar b { color: var(--ink); } .mfbar.on { border-color: #2e9e5b; } .mfbar.off { border-color: #d0453a; }
+.guide { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; display: grid; gap: 12px; }
+.guide h2 { margin: 0; font-size: 17px; }
+.guide ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 20px; }
+.guide li { display: grid; gap: 2px; } .guide li b { color: var(--ink); } .guide li span { color: var(--ink-2); font-size: 14px; }
+.guide .note { margin: 0; color: var(--ink-2); font-size: 13px; }
+.gloss summary { cursor: pointer; font-weight: 600; color: var(--ink); padding: 4px 0; } .gloss[open] summary { margin-bottom: 8px; }
 .livepx { font-size: 14px; color: var(--ink-2); padding: 8px 10px; border-radius: 6px; background: var(--accent-soft); }
 .livepx b { color: var(--ink); }
 .sigcard { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 8px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
@@ -155,7 +163,7 @@ td.r, th.r { text-align: right; }
   <header>
     <div class="eyebrow" id="asof">Spot · USDT pairs · daily candles</div>
     <h1>Crypto Breakout Map</h1>
-    <p class="sub">Every tradable spot coin with enough history, sorted into bull, bear and sideways phases, with its breakout trigger prices, the estimated date window for the next breakout, the measured move after it, volume and market cap. This page pulls the data itself, so it is current whenever it is opened.</p>
+    <p class="sub">Every spot coin's 30-day range, breakout triggers, estimated breakout window and trade plan, live.</p>
   </header>
 
   <div class="livebar" aria-live="polite">
@@ -164,11 +172,25 @@ td.r, th.r { text-align: right; }
     <button id="refresh" type="button" title="Reloads the page: reconnects the live feed and re-reads all data. Your coin and calculator settings are kept.">Refresh</button>
   </div>
 
+  <div class="mfbar" id="mfbar" aria-live="polite">Market filter: checking BTC…</div>
+
+  <section class="guide" aria-labelledby="guide-h">
+    <h2 id="guide-h">How to read this page</h2>
+    <ul>
+      <li><b>🟢 The only buy signal</b><span>A daily close (00:00 UTC) above the green trigger, while BTC is above its 20-day average (market filter open). Everything else is a watch list.</span></li>
+      <li><b>★ Start with Today's candidates</b><span>Coins within 3% of the trigger broke up within 3 days 34% of the time, vs 5% for all coins.</span></li>
+      <li><b>📅 Lists say when, not whether</b><span>This / next week's candidates break up 2–3× more often than average, but their 14-day returns are no better. Wait for the close.</span></li>
+      <li><b>⚠️ Yellow zone = timing only</b><span>Coins entering it broke down twice as often as up. Soonest est. breakout shows no edge on its own.</span></li>
+      <li><b>↕ Lean is a hint</b><span>Right 66% overall, but an "up" lean in a bull phase only 45%.</span></li>
+      <li><b>⚡ TP chances</b><span>TP1 holds up (60%+ → 75% hit). TP2 / TP3 above 40% are optimistic. A touch is not a hold: leave a sell order.</span></li>
+    </ul>
+    <p class="note">Checked Apr–Oct 2026 on 21,000 coin-days, each day using only data known then. Analysis, not financial advice.</p>
+  </section>
+
   <section class="truth" aria-labelledby="truth-h">
     <h2 id="truth-h">How often this method was right</h2>
     <p id="truth-intro">Calculated from live data once the candles load.</p>
     <div class="tiles" id="tiles"></div>
-    <p>No method can give an exact breakout date. The date windows are estimates from each coin's own history, and the direction call is only slightly better than a coin flip. Use the trigger prices as alerts and wait for the daily close (00:00 UTC) to confirm. This is analysis, not personal financial advice.</p>
   </section>
 
   <div class="counts" id="counts"></div>
@@ -194,96 +216,35 @@ td.r, th.r { text-align: right; }
     <section class="detail" aria-live="polite" id="detail"><p class="read">Loading daily candles. The first visit on a device takes about a minute; later visits reuse saved candles and take a few seconds.</p></section>
   </div>
 
-  <section class="truth" aria-labelledby="s-h">
-    <h2 id="s-h">Can you trade it? Tested: no edge</h2>
-    <p>Backtest run on 7 Oct 2026 over 429 coins (up to a year of daily candles each): buy at the next open after a daily close above the 30-day high, long-only. Exits: the map's target with a stop at mid-range, or a trailing exit on a close below the 10-day low. Filters tried: bull phase, tight range before the breakout, breakout-day volume ≥ 1.5× its 20-day average. Costs 0.3% per round trip. Without the five biggest trades (one coin, LAB/USDT, rose about 51×), every rule lost money on average, and buying on random days with the same exits did about as well or better in most cases. The map is for finding levels to watch, not a trading strategy on its own.</p>
-  </section>
-
-  <section class="method" aria-labelledby="m-h">
-    <h2 id="m-h">How it is calculated</h2>
-    <ul>
-      <li><b>Phase</b> (bull / bear / sideways market cycle): bull = close above the 50-day average, which is above the 200-day average and rising; bear = the mirror image; everything else is sideways, "after decline" (possible accumulation) or "after rise" (possible distribution). Under 200 days of history uses a 100-day average.</li>
-      <li><b>Breakout</b> = a daily close (UTC) above the previous 30-day high or below the previous 30-day low. Those two prices are the triggers.</li>
-      <li><b>Date window</b>: middle 50% (25th–75th percentile) of how much longer this coin's past quiet stretches lasted once they had lasted as long as the current one; wide window = middle 80%. Too little history → all coins pooled.</li>
-      <li><b>Direction</b>: bull → up, bear → down, sideways → whichever half of the range price is in.</li>
-      <li><b>Afterwards</b>: measured move (range height projected beyond the trigger, log scale) and the median days past breakouts took to reach it.</li>
-      <li><b>Accuracy test</b>: the method re-run as of 60 days ago with only data up to then, scored against what happened.</li>
-      <li><b>Data</b>: public exchange data (candles, prices, volume), a second exchange's prices for the cross-check, CoinGecko for market cap, and public crypto news feeds. Stablecoins and tokenized stocks are excluded. The open coin streams live from the exchange's WebSocket feed and all other prices refresh every 10 seconds. Every 30 minutes the analysis re-runs with today's still-forming candle (phase, breakout status, squeeze, windows, marked provisional); trigger, target and stop prices stay on the last 30 closed days until the 00:00 UTC close, so they match the Telegram bot.</li>
-    </ul>
-  </section>
-  <section class="method" aria-labelledby="d-h">
-    <h2 id="d-h">What every number means</h2>
-    <dl class="defs">
-      <dt>Phase</dt><dd>The coin's market cycle on daily candles. <b>Bull</b>: price is above its 50-day average, which is above its 200-day average and rising. <b>Bear</b>: the mirror image. <b>Sideways</b>: anything else, labelled "after decline" (possible accumulation) or "after rise" (possible distribution).</dd>
-      <dt>Strategy timeframe</dt><dd>The same breakout rules on 15m, 1h, 4h, 1D or 1W candles, each with its own range: 48 hours on 15m, 5 days on 1h, 7 days on 4h, 30 days on 1D and 26 weeks on 1W. <b>1D (20d)</b> is the daily strategy with a 20-day range instead of 30: it enters earlier with a tighter stop and tested better (Mar–Oct 2026: +2.46% per trade vs +1.65%), but over a full year both lost money; the Telegram bot follows it as a silent live test. <b>1D (30d) is the main strategy</b>: tested over a full year and traded by the Telegram bot. In a 7-month test (449 coins, Mar–Oct 2026) 1h and 4h were positive in both halves, 15m lost money because fees eat its small moves, and 1W has too little history to test. The coin list always uses the daily levels.</dd>
-      <dt>Candles</dt><dd>Each bar is one period: green if it closed higher than it opened, red if lower. The 15m, 1h, 4h and 1W buttons change the view; the analysis itself always uses daily (1D) candles, closing at 00:00 UTC.</dd>
-      <dt>50- and 200-day average</dt><dd>Average closing price over the last 50 and 200 days (periods on other timeframes). Used to decide the phase.</dd>
-      <dt>Green (up) trigger</dt><dd>The highest price of the last 30 days. A daily close above it is a breakout up. It is also the Entry price in the calculator.</dd>
-      <dt>Red (down) trigger</dt><dd>The lowest price of the last 30 days. A daily close below it is a breakdown.</dd>
-      <dt>Green ▲ / red ▼ arrows</dt><dd><b>On the chart</b>: a green ▲ above a candle marks a daily close above the high of the 30 days before it (a breakout up);
-        a red ▼ below a candle marks a close under the 30-day low (a breakdown). Hollow arrows are today's unfinished candle. The dotted green and red steps are that
-        30-day high and low on each day. <b>In the list's Next column</b>: <b>▲ now / ▼ now</b> = broke out up / down at a daily close in the last 2 days;
-        <b>▲ above / ▼ below</b> = trading past a trigger today, not confirmed until the 00:00 UTC close; <b>▲ up / ▼ down</b> = still inside the range, the side the
-        next breakout leans to. <b>★</b> labels appear with the Today's candidates filter (buy today, closes tonight?, near).</dd>
-      <dt>Lists filter</dt><dd>The watch lists (Soonest est. breakout, Today's candidates, This / Next week's candidates, TP1-3 hit in the
-        next 24 hours, Entered yellow zone today) have their own filter, separate from Status, so a list can be combined with a phase or a status.
-        <b>This week's candidates</b> use the next-week rules (inside the range, leaning up, most likely breakout date between today and Sunday,
-        green trigger within 15%, at least $0.1M volume). <b>Soonest est. breakout</b> lists coins inside their range whose window has not passed,
-        soonest most likely date first. All of them say <i>when</i>, not which way; the buy is a daily close above the green trigger.</dd>
-      <dt>📅 Entered yellow zone today</dt><dd>Coins still inside their 30-day range whose estimated breakout window (the darker yellow band on the chart)
-        opens today, with the side they lean to. It is a <b>watch list, not a buy</b>: the window says <i>when</i> a breakout is likely, not which way, and in a
-        test on all coins (about a year) coins entering it broke down more often than up and averaged −2.7% over the next 14 days. The buy is a daily close
-        above the green trigger, which the bot reports at 00:05 UTC. The yellow strip over a coin that is <i>already</i> breaking out marks the breakout
-        candles, which is why it often sits on a rally.</dd>
-      <dt>Sort: closest to green trigger / yellow zone</dt><dd><b>Closest to green trigger</b> orders coins still below their green trigger by how far the
-        price has to rise to reach it (shown as "▲ 2.3% to go"); coins already above it come last. A daily close above the trigger is the breakout signal.
-        <b>Closest to yellow zone</b> orders coins in their range by how many days until their estimated breakout window opens ("📅 in 3 d"; "in zone" when
-        it is open). Both are watch lists; the window predicts timing, not direction.</dd>
-      <dt>⚡ TP2 / TP3 likely in 24 hours</dt><dd>The same idea as TP1 for the second and third take-profit, each with its own model fitted on past
-        breakouts and checked on unseen data (coins given 50%+ reached TP2 87% and TP3 95% of the time). Such fast moves are rare: within a day only
-        13% of breakouts touch TP2 and 6.5% TP3, so these lists are usually short. A touch is not a hold: a sell order must wait at that level.</dd>
-      <dt>🔄 Red-line reclaim (bear-trap check)</dt><dd>Coins that closed below their red trigger (30-day low) in the last 5 days and have now closed back above
-        that level, the classic "bear trap". <b>Tested on all coins (about a year): this did not lead to rallies on average</b>: the next 14 days
-        averaged −1.6% (about 40% higher), worse than a random day (−0.7%), and reclaims on heavy volume did worse (−3.6%). A watch list for you to judge,
-        not a buy signal.</dd>
-      <dt>⚡ TP1 likely in 24 hours</dt><dd>Today's breakout coins (bought today or above the trigger now) with at least a 40% historical chance of touching
-        Target 1 within the next 24 hours. The chance comes from 2,393 past daily breakouts: the closer Target 1 is and the higher the breakout-day volume
-        (vs the 20-day average), the likelier the touch; the first breakout of a move does a little better than a repeat. Checked on unseen data
-        (predicted 50–65% → 75% actual, 65%+ → 90%). A touch is not a hold: the day after a breakout closed about where it started on average, so this
-        profit is caught with a sell order waiting at Target 1, not by holding. Not a buy signal on its own: the BTC filter and the 5% rule still apply.</dd>
-      <dt>Status</dt><dd><b>Above the green / below the red trigger now</b>: the live price is past that level today (confirmed only by the daily close). <b>Within 3%</b>: close to a trigger. <b>Broke out / broke down</b>: a daily close beyond the level in the last 2 days. <b>Inside the range</b>: none of these.</dd>
-      <dt>Est. breakout period</dt><dd>The date range in which the next breakout is most likely, from how long this coin's past quiet stretches between breakouts lasted (middle 50% of outcomes). "Most likely" is the middle date; the wide window covers 80%. Shaded on the daily chart.</dd>
-      <dt>Lean</dt><dd>Which side the next breakout leans to: bull phase leans up, bear phase leans down, sideways follows the half of the range the price is in. In testing it was right about 55% of the time.</dd>
-      <dt>Squeeze</dt><dd>How narrow the price range is compared with the past year. A tight squeeze often comes before a breakout, but not always.</dd>
-      <dt>Days since last breakout</dt><dd>How long the coin has stayed inside its 30-day range.</dd>
-      <dt>Target if it breaks up / down</dt><dd>The measured move: the height of the 30-day range projected beyond the trigger (on a log scale). Drawn as the projected move on the daily chart.</dd>
-      <dt>Targets 1, 2, 3</dt><dd>Checkpoints on the way from Entry to the up target: one third, two thirds and the full move. Target 3 is the take-profit.</dd>
-      <dt>Stop Loss</dt><dd>The middle of the 30-day range. A daily close back there means the breakout failed.</dd>
-      <dt>Current price</dt><dd>The live price, streaming for the open coin and refreshed every 10 seconds for the list. The green dot on the chart.</dd>
-      <dt>Coin ranking</dt><dd>Position by market capitalisation (from CoinGecko). Market cap = circulating supply × price; fully diluted = total supply × price.</dd>
-      <dt>Volume</dt><dd>US-dollar value traded in the last 24 hours, and the last full day compared with its 20-day average. The lower chart pane shows volume per candle.</dd>
-      <dt>Cross-check</dt><dd>The price compared with a second exchange. A big gap usually means a thin market or a different token with the same ticker.</dd>
-      <dt>Provisional</dt><dd>Phase, status and windows are re-calculated every 30 minutes with today's unfinished candle; they become final at the 00:00 UTC close. Triggers and the trade plan stay fixed for the day.</dd>
-      <dt>Reward : risk</dt><dd>Distance to Target 3 divided by distance to the stop. 2 : 1 means the target is twice as far as the stop.</dd>
-      <dt>Risk if stopped / Profit at target</dt><dd>What the calculator's position would lose at the stop or gain at Target 3, before fees.</dd>
-      <dt>Accuracy tiles</dt><dd>The same method run as of 60 days ago and checked against what happened since: how often breakouts landed inside the estimated period, how often the lean was right, and how often targets were reached.</dd>
-      <dt>News &amp; summary</dt><dd>Headlines from public crypto news sources in the last 7 days that mention the coin, with a keyword-based tone (green dot positive, red negative, grey neutral).</dd>
-    </dl>
-  </section>
-
   <section class="method" aria-labelledby="h-h">
-    <h2 id="h-h">How to copy the strategy</h2>
+    <h2 id="h-h">Copy the strategy</h2>
     <ol class="howto">
-      <li>After the daily close (00:00 UTC), open the page. Filter the status to <b>Within 3% under the green trigger</b>, or sort by <b>Closest to a trigger</b>.</li>
-      <li>Open a coin. Check its phase, estimated breakout period, volume and news. Skip coins that lean down (spot trading cannot short) or that trade very little.</li>
-      <li>In the calculator, enter your account size and the % you are willing to lose per trade (2% is a common choice). The quantity is sized so that hitting the stop costs exactly that.</li>
-      <li><b>Entry</b>: place a spot <b>Trigger order</b>: side Buy, trigger price = Entry (just above the green trigger), order type Market, the calculated quantity.</li>
-      <li><b>Exit</b>: once the buy fills, place a spot <b>OCO</b> sell order for the same quantity: TP limit = Target 3, SL trigger price = Stop Loss, SL price = the SL limit shown (0.5% lower so it fills in a fast drop).</li>
-      <li>Targets 1 and 2 are checkpoints for alerts only; the tested plan does not sell there.</li>
-      <li>If neither the take-profit nor the stop has filled after 30 days, sell at market.</li>
-      <li>Keep a record of every trade and compare it with the tested numbers above. In testing this plan did not show an edge, so treat it as a framework for your own decisions, not a guarantee.</li>
+      <li>After 00:00 UTC, open <b>Today's candidates</b> and check the market filter is open.</li>
+      <li>Open a coin; skip ones that lean down or trade little. Set your account size and risk % in the calculator.</li>
+      <li><b>Buy</b>: spot trigger order at Entry, market, the calculated quantity.</li>
+      <li><b>Exit</b>: OCO sell, TP = Target 3, SL = Stop Loss (limit 0.5% lower). Sell at market after 30 days.</li>
+      <li>Tested over a full year this lost money; it paid only in rising markets. Paper-trade it first.</li>
     </ol>
   </section>
+
+  <details class="method gloss">
+    <summary>Glossary &amp; method</summary>
+    <dl class="defs">
+      <dt>Phase</dt><dd>Bull: price &gt; 50-day avg &gt; 200-day avg, rising. Bear: the mirror image. Sideways: anything else.</dd>
+      <dt>Green / red trigger</dt><dd>The 30-day high / low. A daily close beyond it is a breakout / breakdown.</dd>
+      <dt>Arrows</dt><dd>▲ now / ▼ now: broke out in the last 2 days. ▲ above / ▼ below: past a trigger today, unconfirmed. ▲ up / ▼ down: the lean.</dd>
+      <dt>Est. breakout period</dt><dd>Middle 50% of when this coin's past quiet stretches ended (yellow band); the wide window covers 80%.</dd>
+      <dt>Lean</dt><dd>Bull leans up, bear down, sideways follows the half of the range the price is in.</dd>
+      <dt>Lists</dt><dd>Today's (buy today / closes tonight? / within 3%), This &amp; Next week's (lean up, trigger within 15%, ≥ $0.1M volume, most likely date that week), Soonest, Yellow zone today, TP1–3 in 24 hours (≥ 40% chance).</dd>
+      <dt>Red-line reclaim</dt><dd>Closed below the 30-day low in the last 5 days, now back above it. Tested: no rally on average.</dd>
+      <dt>Targets 1–3 / Stop</dt><dd>One third, two thirds and the full measured move (range height above the trigger, log scale). Stop = middle of the range.</dd>
+      <dt>Squeeze</dt><dd>Range width vs the past year; tight squeezes often, not always, come before breakouts.</dd>
+      <dt>Strategy timeframe</dt><dd>The same rules on 15m–1W candles. 1D (30d) is the main strategy the bot trades; 1D (20d) runs as a live test.</dd>
+      <dt>Provisional</dt><dd>Phase, status and windows update every 30 minutes with today's candle; triggers and the plan stay fixed until 00:00 UTC.</dd>
+      <dt>Accuracy tiles</dt><dd>The method re-run as of 60 days ago and scored against what happened since.</dd>
+      <dt>Data</dt><dd>Exchange candles and prices (live), a second exchange for the cross-check, CoinGecko market caps, public news feeds. Stablecoins and tokenized stocks excluded.</dd>
+    </dl>
+  </details>
 </div>
 
 <script id="engine">
@@ -1004,6 +965,14 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     rows.forEach(function (r) { var x = todayTier(r); if (x) td[x.k]++; var tc = t1Chance(r); if (tc && tc.p >= 0.4) t1n++; if (enteredYellow(r)) yn++; if (onWatchlist(r)) nwn++; if (onThisWeek(r)) twn++;
       var a2 = tpChance(r, 2); if (a2 && a2.p >= 0.4) t2n++; var a3 = tpChance(r, 3); if (a3 && a3.p >= 0.4) t3n++; if (redReclaim(r)) rcn++; });
     var bf = btcFilter();
+    var mb = $("mfbar");
+    if (bf) {
+      var gapPct = (bf.close / bf.avg - 1) * 100;
+      mb.className = "mfbar " + (bf.ok ? "on" : "off");
+      mb.innerHTML = (bf.ok ? "🟢 <b>Market filter OPEN</b> · BTC closed " : "🔴 <b>Market filter CLOSED</b> · BTC closed ") + fmtP(bf.close) +
+        ", " + Math.abs(gapPct).toFixed(1) + "% " + (bf.ok ? "above" : "below") + " its 20-day average " + fmtP(bf.avg) +
+        (bf.ok ? " · breakout buys are ON" : " · the bot skips buys until BTC closes back above it");
+    }
     $("counts").innerHTML = "<span><b>" + rows.length + "</b> coins analysed</span><span><b>" + ph.bull + "</b> bull</span><span><b>" + ph.sideways + "</b> sideways</span><span><b>" +
       ph.bear + "</b> bear</span><span><b>" + now + "</b> broke out in the last 2 days</span><span><b>" + up + "</b> above the green trigger now</span><span><b>" + dn + "</b> below the red trigger now</span><span><b>" + state.skipped + "</b> too new to analyse</span>" +
       (state.failed ? "<span><b>" + state.failed + "</b> could not be loaded (retrying automatically)</span>" : "") +
