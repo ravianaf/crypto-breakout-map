@@ -183,7 +183,7 @@ td.r, th.r { text-align: right; }
       <li><b>Check the market filter</b><span>The banner above the list must be 🟢 OPEN (BTC above its 20-day average). 🔴 CLOSED = no new buys.</span></li>
       <li><b>After 00:00 UTC, open Lists → ★ Today's candidates</b><span>"★ buy today" is the signal: a daily close above the green trigger, still within 5% of it. "Within 3%" coins are a watch list (34% broke up within 3 days).</span></li>
       <li><b>Open the coin and check it</b><span>Skip it if it leans down, trades little, or is more than 5% above the trigger. The lean is only a hint ("up" in a bull phase was right 45%).</span></li>
-      <li><b>Size the trade</b><span>Enter your account size and risk % (2% is common) in the calculator; the quantity is sized so the stop costs exactly that.</span></li>
+      <li><b>Size the trade</b><span>Enter your account size and risk % (1% suggested; in tests 2% about doubled the worst drop) in the calculator; the quantity is sized so the stop costs exactly that.</span></li>
       <li><b>Buy</b><span>Spot trigger order at Entry, order type Market, the calculated quantity.</span></li>
       <li><b>Set the exit</b><span>OCO sell: TP = Target 3, SL = Stop Loss (limit 0.5% lower). TP1 / TP2 are checkpoints; a touch is not a hold, so only a waiting order catches it.</span></li>
       <li><b>Day 30</b><span>If neither the TP nor the stop has filled, sell at market.</span></li>
@@ -1102,7 +1102,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       fact("Target if it breaks down", fmtP(r.down_target), ((r.down_target / p - 1) * 100).toFixed(1) + "% from now") +
       fact("Volume (24h)", fmtUsd(t.vol), "last full day " + (avg20 ? (co.v[n - 1] / avg20).toFixed(2) + "× its 20-day average" : "–") +
         (cap && cap.mc && t.vol ? " · " + (t.vol / cap.mc * 100).toFixed(2) + "% of market cap" : "")) +
-      fact(r.modeTf ? "Range" : "History", r.modeTf ? STRATS[r.modeTf].span + " (" + STRATS[r.modeTf].bars + ")" : n + " days", r.modeTf ? "levels from " + tfName(r.modeTf) + " candles closed by " + new Date(r.barAt * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "targets reached within 60 days in " + pct(r.target_hit_rate_hist_pct) + " of past breakouts (" + r.target_stats_source + ")") +
+      fact(r.modeTf ? "Range" : "History", r.modeTf ? STRATS[r.modeTf].span + " (" + STRATS[r.modeTf].bars + ")" : n + " days", r.modeTf ? "levels from " + tfName(r.modeTf) + " candles closed by " + new Date(r.barAt * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "targets reached within 60 days in " + pct(r.target_hit_rate_hist_pct) + " of past breakouts; the plan sells after 30 days, so expect fewer (" + r.target_stats_source + ")") +
       "</div>" + '<p class="read">' + reading(r) + "</p>" +
       '<section class="news" id="newsbox" aria-labelledby="news-h">' + newsHtml(r) + "</section>" +
       planHtml(r);
@@ -1127,7 +1127,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   setInterval(function () { if (!WS.open) liveSel(); }, 15000);   // fallback only while the stream is down
 
   /* ---------- trade plan: spot Trigger entry + OCO exit ---------- */
-  var SIZING = { acct: 100, risk: 2 };
+  var SIZING = { acct: 100, risk: 1 };   // 2026-10-24: 1% (full-year test: 2% roughly doubled the worst drawdown)
   try { var sv = JSON.parse(localStorage.getItem("cbm-sizing") || "null"); if (sv && sv.acct > 0 && sv.risk > 0) SIZING = sv; } catch (e) {}
   function roundTo(x, dp, mode) {
     var f = Math.pow(10, dp);
@@ -1188,7 +1188,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (P.capped) warn.push("Size capped at 20% of your account (the bot's rule); the stop is wide for your risk setting, so actual risk is " + fmtUsd(P.riskUsd) + ".");
     var bfx = btcFilter();
     if (bfx && !bfx.ok) warn.push("Market filter CLOSED (BTC below its 20-day average): the tested rules skip this buy.");
-    if (SIZING.risk > 2) warn.push("Risk above 2% per trade: over a full year this strategy lost money, so a losing streak at this size hurts.");
+    if (SIZING.risk > 1) warn.push("Risk above 1% per trade: in a full-year test 2% roughly doubled the worst drawdown versus 1%, and the strategy lost money over that year.");
     var L = ladder(P);
     return '<section class="plan" aria-labelledby="plan-h">' +
       '<div class="planhead"><h3 id="plan-h" class="planttl">' + coinIcon(r) + esc(r.base) + ' trade plan (spot)</h3>' +
