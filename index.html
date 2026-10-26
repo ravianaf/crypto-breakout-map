@@ -1724,5 +1724,25 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   fullLoad();
 })();
 </script>
+<script>
+// 2026-10-26 (user's request): every UTC time on the page also shows Pakistan time, e.g. "00:00 UTC / 05:00 PKT".
+(function () {
+  var RE = /(\d{1,2}):(\d{2})(\s*[–-]\s*(?:\d{1,2} [A-Z][a-z]{2} )?(\d{1,2}):(\d{2}))? UTC\b(?! \/ \d)/g;
+  function pk(h, m) { return String((+h + 5) % 24).padStart(2, "0") + ":" + m; }
+  function fix(t) {
+    return t.replace(RE, function (all, h1, m1, rng, h2, m2) { return all + " / " + pk(h1, m1) + (rng ? "–" + pk(h2, m2) : "") + " PKT"; });
+  }
+  function walk() {
+    var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: function (n) {
+      var p = n.parentNode && n.parentNode.nodeName;
+      return p === "SCRIPT" || p === "STYLE" || p === "TEXTAREA" || n.nodeValue.indexOf("UTC") < 0 ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; } });
+    for (var n; (n = w.nextNode());) { var v = fix(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v; }
+  }
+  var queued = false;
+  new MutationObserver(function () { if (!queued) { queued = true; requestAnimationFrame(function () { queued = false; walk(); }); } })
+    .observe(document.body, { childList: true, subtree: true, characterData: true });
+  walk();
+})();
+</script>
 </body>
 </html>
