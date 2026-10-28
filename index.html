@@ -182,7 +182,7 @@ td.r, th.r { text-align: right; }
     <ol>
       <li><b>Check the market filter</b><span>The banner above the list must be 🟢 OPEN (BTC above its 20-day average). 🔴 CLOSED = no new buys.</span></li>
       <li><b>After 00:00 UTC, open Lists → ★ Today's candidates</b><span>"★ buy today" is the signal: a daily close above the green trigger, still within 5% of it. "Within 3%" coins are a watch list (34% broke up within 3 days).</span></li>
-      <li><b>Open the coin and check it</b><span>Skip it if it leans down, trades little, or is more than 5% above the trigger. The lean is only a hint ("up" in a bull phase was right 45%).</span></li>
+      <li><b>Open the coin and check it</b><span>Skip it if it leans down, trades little, is more than 5% above the trigger, or the price is more than 15% above the Stop Loss (wide stops lost money in tests). The lean is only a hint ("up" in a bull phase was right 45%).</span></li>
       <li><b>Size the trade</b><span>Enter your account size and risk % (1% suggested; in tests 2% about doubled the worst drop) in the calculator; the quantity is sized so the stop costs exactly that.</span></li>
       <li><b>Buy</b><span>Spot trigger order at Entry, order type Market, the calculated quantity.</span></li>
       <li><b>Set the exit</b><span>OCO sell: TP = Target 3, SL = Stop Loss (limit 0.5% lower). TP1 / TP2 are checkpoints; a touch is not a hold, so only a waiting order catches it.</span></li>
@@ -807,7 +807,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     var p = livePrice(r);
     if (closedStatus(r) === "breaking up now" && closedQ(r) === 0) {
       var lvl = breakoutLevel(r);
-      if (lvl && p / lvl - 1 <= 0.05 && p > (r.up_trigger + r.down_trigger) / 2) return { k: "signal", n: 1, chase: (p / lvl - 1) * 100 };
+      var stop = (r.up_trigger + r.down_trigger) / 2;   // 2026-10-28: the bot also skips a stop more than 15% below
+      if (lvl && p / lvl - 1 <= 0.05 && p > stop && p / stop - 1 <= 0.15) return { k: "signal", n: 1, chase: (p / lvl - 1) * 100 };
     }
     if (p > r.up_trigger) return { k: "tonight", n: 2 };
     var today = new Date().toISOString().slice(0, 10);
@@ -1187,6 +1188,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (P.tooSmall) warn.push("At this account size and risk the order is below the exchange minimum of " + (r.minUsdt || 1) + " USDT.");
     if (P.capped) warn.push("Size capped at 20% of your account (the bot's rule); the stop is wide for your risk setting, so actual risk is " + fmtUsd(P.riskUsd) + ".");
     var bfx = btcFilter();
+    var stopD = (Math.max(live || 0, P.entry) / ((r.up_trigger + r.down_trigger) / 2) - 1) * 100;
+    if (stopD > 15) warn.push("Wide stop: the price is " + stopD.toFixed(0) + "% above the Stop Loss (the rule is 15% at most). In tests, skipping wide-stop breakouts raised the average trade from −0.3% to +0.8%; the bot skips these.");
     if (bfx && !bfx.ok) warn.push("Market filter CLOSED (BTC below its 20-day average): the tested rules skip this buy.");
     if (SIZING.risk > 1) warn.push("Risk above 1% per trade: in a full-year test 2% roughly doubled the worst drawdown versus 1%, and the strategy lost money over that year.");
     var L = ladder(P);
