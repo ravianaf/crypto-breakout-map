@@ -156,6 +156,10 @@ td.r, th.r { text-align: right; }
 .livepx b { color: var(--ink); }
 .sigcard { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 8px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .sigcard pre { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; min-width: 0; }
+.tpeta { flex-basis: 100%; border-top: 1px solid var(--line); padding-top: 8px; font-size: 13px; color: var(--ink-2); }
+.tpeta ul { margin: 4px 0 6px; padding-left: 18px; line-height: 1.6; }
+.tpeta b { color: var(--ink); }
+.tpeta small { display: block; font-size: 11.5px; }
   .planttl { display: flex; align-items: center; gap: 10px; }
   .coinicon { width: 28px; height: 28px; border-radius: 50%; flex: none; object-fit: cover; background: var(--panel-2, rgba(127,127,127,.15)); }
   .coinwrap { position: relative; width: 28px; height: 28px; flex: none; }
@@ -1171,6 +1175,29 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       "\n\nTarget 1: " + f(P.t1) + " (+" + pc(P.t1) + ")\nTarget 2: " + f(P.t2) + " (+" + pc(P.t2) + ")\nTarget 3: " + f(P.tp) + " (+" + pc(P.tp) + ")" +
       "\n\nEst. breakout period: " + est;
   }
+  // 2026-11-08 (user): est. time and date of each target under the Copy signal button. Same table as the bot's buy post
+  // (hourly re-measure 2026-11-03, live rules, Mar-Oct 2026): per TP3-distance band [up to %, [[median, hit %, p25, p75] x3]], days
+  var TP_TIMING = [[40, [[1.4, 67, 0.3, 3.7], [3.6, 46, 0.9, 8.6], [5.3, 36, 1.2, 14.8]]],
+                   [70, [[2.4, 43, 1.1, 8.9], [5.6, 26, 2.0, 12.1], [9.1, 18, 2.4, 13.2]]],
+                   [1e9, [[6.0, 43, 1.7, 9.8], [10.2, 24, 7.7, 15.4], [15.6, 13, 10.1, 18.8]]]];
+  function durTxt(d) { if (d < 1) return Math.max(1, Math.round(d * 24)) + "h"; var n = Math.round(d); return n + (n === 1 ? " day" : " days"); }
+  function tpEtaHtml(r, P) {
+    var live = livePrice(r), inProg = r.status.indexOf("up") >= 0 || live >= P.entry;   // a down-break has not bought yet
+    var buy = inProg ? Math.max(live, P.entry) : P.entry, start = inProg ? Date.now() / 1000 : estTs(r, 50);
+    var dist = (P.tp / buy - 1) * 100, row = TP_TIMING.filter(function (x) { return dist <= x[0]; })[0][1];
+    var when = function (d) { return fmtTs(start + d * 86400, true); };
+    var head = inProg ? "counted from now (breakout in progress)"
+      : start ? "counted from the most likely breakout, " + fmtTs(start) : "counted from the buy (breakout date not estimated)";
+    var rows = [P.t1, P.t2, P.tp].map(function (lvl, i) {
+      var x = row[i];
+      if (buy >= lvl) return "<li><b>Target " + (i + 1) + "</b> · already reached</li>";
+      return "<li><b>Target " + (i + 1) + "</b> · " + (start ? '<span class="num">' + when(x[2]) + " – " + when(x[3]) + " UTC</span> (around " + when(x[0]) + ")"
+        : durTxt(x[2]) + "–" + durTxt(x[3]) + " after the buy (typical " + durTxt(x[0]) + ")") + " · past signals hit it " + x[1] + "%</li>";
+    });
+    return '<div class="tpeta"><div>Est. time and date to each target, if reached · ' + head + "</div><ul>" + rows.join("") + "</ul>" +
+      "<small>Usual range = the middle half of past signals that reached that target (hourly test, Mar–Oct 2026); 1 in 4 took longer. " +
+      "Times swing a lot with the market (TP3 typical 3–14 days by month). An estimate, not a promise.</small></div>";
+  }
   function livePxHtml(r, P) {
     var t = state.tick[r.id] || {}, live = livePrice(r), d = (P.entry / live - 1) * 100;
     var when = t.at ? new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "–";
@@ -1199,7 +1226,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       '<label for="riskp">Risk per trade (%)</label><input id="riskp" type="number" min="0.1" max="100" step="0.1" value="' + SIZING.risk + '"></div></div>' +
       '<div class="livepx" id="livepx" aria-live="polite">' + livePxHtml(r, P) + "</div>" +
       '<div class="sigcard"><pre class="num" id="sigtext">' + esc(signalTextFor(r, P)) + '</pre>' +
-        '<button type="button" class="cp" data-v="' + esc(signalTextFor(r, P)) + '">Copy signal</button></div>' +
+        '<button type="button" class="cp" data-v="' + esc(signalTextFor(r, P)) + '">Copy signal</button>' + tpEtaHtml(r, P) + '</div>' +
       '<div class="steps">' +
       '<div class="step"><div class="eyebrow">Step 1 · Entry · Spot → Trigger order</div>' +
         line("Side", "Buy", "", true) + line("Trigger price", f(P.entry), "one tick above the 30-day high " + fmtP(r.up_trigger)) +
