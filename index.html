@@ -144,7 +144,7 @@ td.r, th.r { text-align: right; }
 .ladder th { color: var(--ink-2); font-weight: 600; } .ladder tr.pos td:nth-child(4) { color: #2e9e5b; } .ladder tr.neg td:nth-child(4) { color: #d0453a; }
 .howto { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 .mfbar { border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; background: var(--panel); color: var(--ink-2); }
-.mfbar b { color: var(--ink); } .mfbar.on { border-color: #2e9e5b; } .mfbar.off { border-color: #d0453a; }
+.mfbar b { color: var(--ink); } .mfbar.on { border-color: #2e9e5b; } .mfbar.off { border-color: #d08a1a; }
 .guide { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; display: grid; gap: 12px; }
 .guide h2 { margin: 0; font-size: 17px; }
 .guide ol { margin: 0; padding-left: 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px 28px; }
@@ -184,7 +184,7 @@ td.r, th.r { text-align: right; }
   <section class="guide" aria-labelledby="guide-h">
     <h2 id="guide-h">How to trade this strategy</h2>
     <ol>
-      <li><b>Check the market filter</b><span>The banner above the list must be 🟢 OPEN (BTC above its 20-day average). 🔴 CLOSED = no new buys.</span></li>
+      <li><b>Check the market</b><span>The banner above the list shows BTC against its 20-day average. 🟢 STRONG = normal buys. 🟠 WEAK (BTC below it) = the bot still buys every signal, but trades in a weak market carry more risk.</span></li>
       <li><b>After 00:00 UTC, open Lists → ★ Today's candidates</b><span>"★ buy today" is the signal: a daily close above the green trigger, still within 5% of it. "Within 3%" coins are a watch list (34% broke up within 3 days).</span></li>
       <li><b>Open the coin and check it</b><span>Skip it if it leans down, trades little, is more than 5% above the trigger, or the price is more than 15% above the Stop Loss (wide stops lost money in tests). The lean is only a hint ("up" in a bull phase was right 45%).</span></li>
       <li><b>Size the trade</b><span>Enter your account size and risk % (1% suggested; in tests 2% about doubled the worst drop) in the calculator; the quantity is sized so the stop costs exactly that.</span></li>
@@ -202,7 +202,7 @@ td.r, th.r { text-align: right; }
     <div class="tiles" id="tiles"></div>
   </section>
 
-  <div class="mfbar" id="mfbar" aria-live="polite">Market filter: checking BTC…</div>
+  <div class="mfbar" id="mfbar" aria-live="polite">Market: checking BTC…</div>
   <div class="counts" id="counts"></div>
 
   <div class="main">
@@ -796,7 +796,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   }
   /* Today's candidates, in the order the bot would act on them:
        1 "signal"  broke out at the last daily close and is still within 5% of the breakout level: the bot's
-                   buy for today (it buys at 00:05 UTC when BTC is above its 20-day average)
+                   buy for today (it buys at 00:05 UTC; since 2026-11-08 also when BTC is below its 20-day average)
        2 "tonight" trading above the green trigger now: a daily close there is tomorrow's signal
        3 "near"    within 3% under the green trigger and inside its estimated breakout window */
   function closedStatus(r) { return r.closedStatus !== undefined ? r.closedStatus : r.status; }
@@ -969,9 +969,10 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (bf) {
       var gapPct = (bf.close / bf.avg - 1) * 100;
       mb.className = "mfbar " + (bf.ok ? "on" : "off");
-      mb.innerHTML = (bf.ok ? "🟢 <b>Market filter OPEN</b> · BTC closed " : "🔴 <b>Market filter CLOSED</b> · BTC closed ") + fmtP(bf.close) +
+      // 2026-11-08: the bot now buys in a weak market too (its posts carry a higher-risk note), so this is a warning, not a stop
+      mb.innerHTML = (bf.ok ? "🟢 <b>Market strong</b> · BTC closed " : "🟠 <b>Weak market</b> · BTC closed ") + fmtP(bf.close) +
         ", " + Math.abs(gapPct).toFixed(1) + "% " + (bf.ok ? "above" : "below") + " its 20-day average " + fmtP(bf.avg) +
-        (bf.ok ? " · breakout buys are ON" : " · the bot skips buys until BTC closes back above it");
+        (bf.ok ? " · breakout buys are ON" : " · the bot still buys every signal, but these trades carry more risk");
     }
     $("counts").innerHTML = "<span><b>" + rows.length + "</b> coins analysed</span><span><b>" + ph.bull + "</b> bull</span><span><b>" + ph.sideways + "</b> sideways</span><span><b>" +
       ph.bear + "</b> bear</span><span><b>" + now + "</b> broke out in the last 2 days</span><span><b>" + up + "</b> above the green trigger now</span><span><b>" + dn + "</b> below the red trigger now</span><span><b>" + state.skipped + "</b> too new to analyse</span>" +
@@ -1217,7 +1218,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     var bfx = btcFilter();
     var stopD = (Math.max(live || 0, P.entry) / ((r.up_trigger + r.down_trigger) / 2) - 1) * 100;
     if (stopD > 15) warn.push("Wide stop: the price is " + stopD.toFixed(0) + "% above the Stop Loss (the rule is 15% at most). In tests, skipping wide-stop breakouts raised the average trade from −0.3% to +0.8%; the bot skips these.");
-    if (bfx && !bfx.ok) warn.push("Market filter CLOSED (BTC below its 20-day average): the tested rules skip this buy.");
+    if (bfx && !bfx.ok) warn.push("Weak market (BTC below its 20-day average): the bot still buys this signal, but breakouts in a weak market carry more risk. Keep the 1% risk sizing.");
     if (SIZING.risk > 1) warn.push("Risk above 1% per trade: in a full-year test 2% roughly doubled the worst drawdown versus 1%, and the strategy lost money over that year.");
     var L = ladder(P);
     return '<section class="plan" aria-labelledby="plan-h">' +
