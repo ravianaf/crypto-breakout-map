@@ -384,14 +384,19 @@ var ENGINE = (function () {
       var w = p._win;
       rows.push({ phase: p.phase, bias: p.bias, as_of: p.as_of, day: day, dir: dir,
         in50: day !== null && w[25] <= day && day <= w[75], in80: day !== null && w[10] <= day && day <= w[90],
+        // 2026-11-15: a window that ends after the BT days scored can't be judged yet (no breakout so far is not a miss)
+        done50: w[75] <= BT, done80: w[90] <= BT,
         dirOk: dir ? dir === p.bias : null, hit: hit });
     });
+    var due50 = rows.filter(function (r) { return r.done50; }), due80 = rows.filter(function (r) { return r.done80; });
     var broke = rows.filter(function (r) { return r.day !== null; });
     var mean = function (arr, f) { return arr.length ? arr.filter(f).length / arr.length * 100 : NaN; };
     var byPhase = {};
     ["bull", "bear", "sideways"].forEach(function (ph) { var g = broke.filter(function (r) { return r.phase === ph; }); if (g.length) byPhase[ph] = mean(g, function (r) { return r.dirOk; }); });
-    return { coins_scored: rows.length, in_p25_p75_pct: mean(rows, function (r) { return r.in50; }),
-      in_p10_p90_pct: mean(rows, function (r) { return r.in80; }), dir_correct_pct: mean(broke, function (r) { return r.dirOk; }),
+    return { coins_scored: rows.length, in_p25_p75_pct: mean(due50, function (r) { return r.in50; }), n50: due50.length,
+      in_p10_p90_pct: mean(due80, function (r) { return r.in80; }), n80: due80.length,
+      in_p25_p75_all_pct: mean(rows, function (r) { return r.in50; }),
+      dir_correct_pct: mean(broke, function (r) { return r.dirOk; }),
       target_hit_30d_pct: mean(broke, function (r) { return r.hit; }), dir_correct_by_phase: byPhase,
       as_of: rows.length ? rows[0].as_of : null };
   }
@@ -941,8 +946,10 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (s && s.coins_scored) {
       $("truth-intro").textContent = "The same method was run as it stood on " + fmtDY(s.as_of) + ", using only data up to that day, and scored against what " + s.coins_scored + " coins did in the 60 days since. Recalculated each day from live data.";
       var tiles = [
-        [pct(s.in_p25_p75_pct), "breakouts landed inside the middle-50% date window", "a well-calibrated 50% window should score about 50%"],
-        [pct(s.in_p10_p90_pct), "landed inside the wide (middle-80%) window", "should score about 80%"],
+        [pct(s.in_p25_p75_pct), "breakouts landed inside the middle-50% date window",
+          "a well-calibrated 50% window should score about 50% · " + s.n50 + " coins whose window has passed" +
+          (isFinite(s.in_p25_p75_all_pct) ? " (" + pct(s.in_p25_p75_all_pct) + " counting every coin)" : "")],
+        [pct(s.in_p10_p90_pct), "landed inside the wide (middle-80%) window", "should score about 80% · " + s.n80 + " coins whose window has passed"],
         [pct(s.dir_correct_pct), "direction calls were right", "a coin flip scores 50%" + (s.dir_correct_by_phase.bull != null ? "; bull-phase calls " + pct(s.dir_correct_by_phase.bull) : "")],
         [pct(s.target_hit_30d_pct), "reached the measured-move target within 30 days", "of the coins that broke out"]
       ];
