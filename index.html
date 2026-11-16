@@ -367,12 +367,20 @@ var ENGINE = (function () {
     });
     return { gaps: gaps, mv: mv };
   }
+  // 2026-11-15: scored from several starting days (60, 65, ... 90 days ago), not one, so a single unusual week does not
+  // swing the tiles; each start is judged on the BT days that followed it. Misses are split into early / late / none.
+  var BT_STARTS = [0, 5, 10, 15, 20, 25, 30];
   function backtest(coins) {
-    var P = pools(coins, BT), rows = [];
+    var rows = [];
+    BT_STARTS.forEach(function (extra) { rows = rows.concat(backtestFrom(coins, BT + extra)); });
+    return summarize(rows);
+  }
+  function backtestFrom(coins, cut) {
+    var P = pools(coins, cut), rows = [];
     coins.forEach(function (co) {
-      var n = co.c.length; if (n < BOX + 60 + BT) return;
-      var t0 = n - 1 - BT, p = analyze(co, t0, P.gaps, P.mv); if (!p._win) return;
-      var after = -1; for (var d = t0 + 1; d < n; d++) if (co.ev[d]) { after = d; break; }
+      var n = co.c.length; if (n < BOX + 60 + cut) return;
+      var t0 = n - 1 - cut, p = analyze(co, t0, P.gaps, P.mv); if (!p._win) return;
+      var after = -1; for (var d = t0 + 1; d <= Math.min(t0 + BT, n - 1); d++) if (co.ev[d]) { after = d; break; }
       var day = after >= 0 ? after - t0 : null, dir = after >= 0 ? (co.ev[after] > 0 ? "up" : "down") : null, hit = null;
       if (dir) {
         hit = false;
@@ -386,8 +394,12 @@ var ENGINE = (function () {
         in50: day !== null && w[25] <= day && day <= w[75], in80: day !== null && w[10] <= day && day <= w[90],
         // 2026-11-15: a window that ends after the BT days scored can't be judged yet (no breakout so far is not a miss)
         done50: w[75] <= BT, done80: w[90] <= BT,
+        early: day !== null && day < w[25], late: day !== null && day > w[75],
         dirOk: dir ? dir === p.bias : null, hit: hit });
     });
+    return rows;
+  }
+  function summarize(rows) {
     var due50 = rows.filter(function (r) { return r.done50; }), due80 = rows.filter(function (r) { return r.done80; });
     var broke = rows.filter(function (r) { return r.day !== null; });
     var mean = function (arr, f) { return arr.length ? arr.filter(f).length / arr.length * 100 : NaN; };
@@ -398,13 +410,18 @@ var ENGINE = (function () {
       in_p25_p75_all_pct: mean(rows, function (r) { return r.in50; }),
       dir_correct_pct: mean(broke, function (r) { return r.dirOk; }),
       target_hit_30d_pct: mean(broke, function (r) { return r.hit; }), dir_correct_by_phase: byPhase,
-      as_of: rows.length ? rows[0].as_of : null };
+      early_pct: mean(due50, function (r) { return r.early; }), late_pct: mean(due50, function (r) { return r.late; }),
+      none_pct: mean(due50, function (r) { return r.day === null; }),
+      starts: BT_STARTS.length,
+      as_of: rows.length ? rows.reduce(function (a, r) { return r.as_of > a ? r.as_of : a; }, rows[0].as_of) : null,
+      as_of_first: rows.length ? rows.reduce(function (a, r) { return r.as_of < a ? r.as_of : a; }, rows[0].as_of) : null };
   }
-  function run(coins) {
+  function run(coins, opts) {
     var usable = coins.filter(function (co) { return co.c.length >= BOX + 40; }).map(prepare);
     var P = pools(usable, 0);
     var rows = usable.map(function (co) { var r = analyze(co, co.c.length - 1, P.gaps, P.mv); delete r._win; return r; });
-    return { rows: rows, summary: backtest(usable), coins: usable };
+    // the 30-minute provisional re-run does not use the accuracy check, so it skips it (it scores 7 starting days)
+    return { rows: rows, summary: opts && opts.noBacktest ? null : backtest(usable), coins: usable };
   }
   return { run: run, analyze: analyze, prepare: prepare, pools: pools, BOX: BOX };
 })();
@@ -687,7 +704,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
           ts: co.ts.concat([k[0]]), o: co.o.concat([k[1]]), h: co.h.concat([k[2]]), l: co.l.concat([k[3]]),
           c: co.c.concat([k[4]]), v: co.v.concat([k[5]]) };
       }).filter(Boolean);
-      var out = ENGINE.run(prov), byS = {}, pc = {};
+      var out = ENGINE.run(prov, { noBacktest: true }), byS = {}, pc = {};
       out.rows.forEach(function (x) { byS[x.symbol] = x; });
       out.coins.forEach(function (x) { pc[x.symbol] = x; });
       var n = 0;
@@ -944,11 +961,13 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     var s = state.summary, rows = state.rows;
     $("asof").textContent = "Spot · USDT pairs · daily candles to " + fmtDY(state.asOf) + " · " + rows.length + " coins";
     if (s && s.coins_scored) {
-      $("truth-intro").textContent = "The same method was run as it stood on " + fmtDY(s.as_of) + ", using only data up to that day, and scored against what " + s.coins_scored + " coins did in the 60 days since. Recalculated each day from live data.";
+      $("truth-intro").textContent = "The same method was run as it stood on " + s.starts + " different days from " + fmtDY(s.as_of_first) +
+        " to " + fmtDY(s.as_of) + ", each time using only data up to that day, and scored against what the coins did in the 60 days after (" +
+        s.coins_scored + " coin forecasts). Recalculated each day from live data.";
       var tiles = [
         [pct(s.in_p25_p75_pct), "breakouts landed inside the middle-50% date window",
-          "a well-calibrated 50% window should score about 50% · " + s.n50 + " coins whose window has passed" +
-          (isFinite(s.in_p25_p75_all_pct) ? " (" + pct(s.in_p25_p75_all_pct) + " counting every coin)" : "")],
+          "a well-calibrated 50% window should score about 50% · misses: " + pct(s.early_pct) + " came earlier, " + pct(s.late_pct) +
+          " later, " + pct(s.none_pct) + " no breakout within 60 days"],
         [pct(s.in_p10_p90_pct), "landed inside the wide (middle-80%) window", "should score about 80% · " + s.n80 + " coins whose window has passed"],
         [pct(s.dir_correct_pct), "direction calls were right", "a coin flip scores 50%" + (s.dir_correct_by_phase.bull != null ? "; bull-phase calls " + pct(s.dir_correct_by_phase.bull) : "")],
         [pct(s.target_hit_30d_pct), "reached the measured-move target within 30 days", "of the coins that broke out"]
