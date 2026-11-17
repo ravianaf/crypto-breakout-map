@@ -77,6 +77,7 @@ td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); white-space: nowr
 tr.row { cursor: pointer; } tr.row:hover td { background: var(--line-2); } tr.row.sel td { background: var(--accent-soft); }
 td.r, th.r { text-align: right; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.goldtag { font-size: 11px; color: #c9a227; font-weight: 500; white-space: nowrap; }
 .pill.bull { background: var(--pill-bull); } .pill.bear { background: var(--pill-bear); } .pill.sideways, .pill.young { background: var(--pill-side); }
 .arrow-up { color: var(--up); font-weight: 600; } .arrow-down { color: var(--down); font-weight: 600; }
 .flash { animation: flash 1.2s ease-out; }
@@ -208,7 +209,7 @@ td.r, th.r { text-align: right; }
   <div class="main">
     <section class="list" aria-label="Coin list">
       <div class="filters">
-        <input id="q" type="search" placeholder="Search coin, e.g. SOL" autocomplete="off" aria-label="Search coins">
+        <input id="q" type="search" placeholder="Search coin, e.g. SOL or GOLD" autocomplete="off" aria-label="Search coins">
         <select id="fphase" aria-label="Phase"><option value="">All phases</option><option value="bull">Bull</option><option value="sideways">Sideways</option><option value="bear">Bear</option></select>
         <select id="flist" aria-label="Lists"><option value="">All coins (no list)</option><option value="soonest">📅 Soonest est. breakout</option><option value="today">★ Today's candidates</option><option value="thisweek">📅 This week's candidates</option><option value="nextweek">📅 Next week's candidates</option><option value="t1day">⚡ TP1 hit in next 24 hours</option><option value="t2day">⚡ TP2 hit in next 24 hours</option><option value="t3day">⚡ TP3 hit in next 24 hours</option><option value="yellow">📅 Entered yellow zone today</option><option value="reclaim">🔄 Red-line reclaim (bear-trap check)</option></select>
         <select id="fstatus" aria-label="Status"><option value="">Any status</option><option value="above_up">▲ Above the green (up) trigger now</option><option value="below_down">▼ Below the red (down) trigger now</option><option value="near_up">Within 3% under the green trigger</option><option value="near_down">Within 3% above the red trigger</option><option value="broke_up">▲ Broke out up (daily close, last 2 days)</option><option value="broke_down">▼ Broke down (daily close, last 2 days)</option><option value="ranging">Inside the range</option></select>
@@ -433,6 +434,9 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var NS = "http://www.w3.org/2000/svg", DAY = 86400, DAYMS = 864e5, HIST = 420, LIST_REFRESH_MS = 10 * 1000;
+  // 2026-11-17 (user: include XAU/USD): the exchange has no XAU/USD spot market; gold is listed as gold-backed tokens that
+  // track it 1:1 (XAUT = Tether Gold, PAXG = Pax Gold). They are analysed like every coin; search "gold" / "XAU" or #XAUUSD finds them.
+  var GOLD_BASES = { XAUT: 1, PAXG: 1 }, GOLD_Q = /^(GOLD|XAU|XAUUSD|XAU\/USD|XAUUSDT)$/;
   var API = "https://api.bitget.com/api/v2/spot";
   var STABLES = ["USAT","U","USDC","FDUSD","TUSD","DAI","USDD","PYUSD","USDE","BUSD","EUR","EURT","USTC","USDP","GUSD","FRAX","LUSD","GHO","USD1","RLUSD","USDS","USDG","EURC","USDT","BFUSD","USDF"];
   var state = { coins: [], rows: [], byS: {}, summary: null, tick: {}, bn: {}, cg: {}, sel: null, lastRefresh: 0, asOf: null, skipped: 0, busy: false };
@@ -978,6 +982,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     renderList(soft);
     if (!state.sel || !state.byS[state.sel]) {
       var hash = (location.hash || "").slice(1).toUpperCase();
+      if (GOLD_Q.test(hash)) hash = "XAUTUSDT";       // #XAUUSD / #GOLD open the gold token (XAU/USD)
       var pick = rows.filter(function (r) { return r.symbol.replace("/", "") === hash; })[0] || state.byS["BTC/USDT"] || rows[0];
       if (pick) state.sel = pick.symbol;
     }
@@ -1047,7 +1052,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   function filtered() {
     var q = $("q").value.trim().toUpperCase(), fp = $("fphase").value, fs = $("fstatus").value, so = $("sort").value, fl = $("flist").value;
     var list = state.rows.filter(function (r) {
-      if (q && r.symbol.indexOf(q) < 0) return false;
+      if (q && r.symbol.indexOf(q) < 0 && !(GOLD_Q.test(q) && GOLD_BASES[r.base])) return false;
       if (fp && r.phase !== fp) return false;
       if (fs || fl) { var ks = statusKey(r); if ((fs && ks.indexOf(fs) < 0) || (fl && ks.indexOf(fl) < 0)) return false; }
       return true;
@@ -1079,7 +1084,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       var next = nextCell(r);
       var when = r.status !== "ranging" ? "now" : fmtRange(r.bo_p25, r.bo_p75);
       return '<tr class="row' + (state.sel === r.symbol ? " sel" : "") + '" data-s="' + esc(r.symbol) + '" tabindex="0"><td><b>' + esc(r.base) +
-        '</b></td><td class="r num">' + fmtP(livePrice(r)) + '</td><td><span class="pill ' + r.phase + '">' + r.phase +
+        '</b>' + (GOLD_BASES[r.base] ? ' <small class="goldtag" title="Gold-backed token: tracks the gold price (XAU/USD)">gold · XAU/USD</small>' : "") +
+        '</td><td class="r num">' + fmtP(livePrice(r)) + '</td><td><span class="pill ' + r.phase + '">' + r.phase +
         "</span></td><td>" + next + '</td><td class="num">' + when + "</td></tr>";
     }).join("");
   }
