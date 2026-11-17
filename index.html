@@ -587,7 +587,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   }
   function loadTickers() {
     var bg = getJSON(API + "/market/tickers").then(function (j) {
-      var m = {}; (j.data || []).forEach(function (t) { m[t.symbol] = { last: +t.lastPr, vol: +t.usdtVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr }; }); state.tick = m;
+      var m = {}; (j.data || []).forEach(function (t) { m[t.symbol] = { last: +t.lastPr, vol: +t.usdtVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr, openUtc: +t.openUtc }; }); state.tick = m;
     });
     var bn = getJSON("https://api.binance.com/api/v3/ticker/price", 2).then(function (arr) {
       var m = {}; (arr || []).forEach(function (t) { m[t.symbol] = +t.price; }); state.bn = m;
@@ -777,7 +777,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       var d; try { d = JSON.parse(m.data); } catch (e) { return; }
       if (!d.data || !d.arg || d.arg.channel !== "ticker") return;
       var t = d.data[0], id = d.arg.instId;
-      state.tick[id] = { last: +t.lastPr, vol: +t.quoteVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr };
+      state.tick[id] = { last: +t.lastPr, vol: +t.quoteVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr, openUtc: +t.openUtc || (state.tick[id] || {}).openUtc };
       var r = state.byS[state.sel];
       if (r && r.id === id) scheduleSel();
     };
@@ -836,13 +836,17 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   var MAX_SPREAD_PCT = 3;                      // same as the bot's CBM_MAX_SPREAD_PCT
   function spreadPct(r) { var t = state.tick[r.id] || {}; return t.bid > 0 && t.ask > 0 ? (t.ask / t.bid - 1) * 100 : null; }
   function wideSpread(r) { var x = spreadPct(r); return x !== null && x > MAX_SPREAD_PCT; }
+  // 2026-11-17: the bot decides once, at the 00:00 UTC open; the page judges "buy today" on that same open price, not on
+  // the live price (BLESS on 17 Nov: 30% above its level at the open -> skipped, then fell back under the level and showed
+  // as a buy all day). The live price is only used when the open is not known yet.
+  function openPrice(r) { var t = state.tick[r.id] || {}; return t.openUtc > 0 ? t.openUtc : null; }
   function todayTier(r) {
     var p = livePrice(r);
     if (closedStatus(r) === "breaking up now" && closedQ(r) === 0) {
-      var lvl = breakoutLevel(r);
+      var lvl = breakoutLevel(r), p0 = openPrice(r) || p;
       var stop = (r.up_trigger + r.down_trigger) / 2;   // 2026-10-28: the bot also skips a stop more than 15% below
       // 2026-11-14: like the bot, a coin with no real market (ask more than 3% above bid, e.g. IAG 0.05 / 0.3) is no buy
-      if (lvl && p / lvl - 1 <= 0.05 && p > stop && p / stop - 1 <= 0.15 && !wideSpread(r)) return { k: "signal", n: 1, chase: (p / lvl - 1) * 100 };
+      if (lvl && p0 / lvl - 1 <= 0.05 && p0 > stop && p0 / stop - 1 <= 0.15 && !wideSpread(r)) return { k: "signal", n: 1, chase: (p0 / lvl - 1) * 100 };
     }
     if (p > r.up_trigger) return { k: "tonight", n: 2 };
     var today = new Date().toISOString().slice(0, 10);
@@ -1161,7 +1165,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     liveBusy = true;
     getJSON(API + "/market/tickers?symbol=" + encodeURIComponent(r.id), 1).then(function (j) {
       var t = (j.data || [])[0]; if (!t || state.sel !== r.symbol) return;
-      state.tick[r.id] = { last: +t.lastPr, vol: +t.usdtVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr };
+      state.tick[r.id] = { last: +t.lastPr, vol: +t.usdtVolume, ts: +t.ts, at: Date.now(), bid: +t.bidPr, ask: +t.askPr, openUtc: +t.openUtc };
       lastChartDraw = 0;
       updateSelLive(false);
     }).catch(function () {}).then(function () { liveBusy = false; });
@@ -1253,7 +1257,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     if (P.capped) warn.push("Size capped at 20% of your account (the bot's rule); the stop is wide for your risk setting, so actual risk is " + fmtUsd(P.riskUsd) + ".");
     var bfx = btcFilter();
     var stopD = (Math.max(live || 0, P.entry) / ((r.up_trigger + r.down_trigger) / 2) - 1) * 100;
-    if (stopD > 15) warn.push("Wide stop: the price is " + stopD.toFixed(0) + "% above the Stop Loss (the rule is 15% at most). In tests, skipping wide-stop breakouts raised the average trade from −0.3% to +0.8%; the bot skips these.");
+    if (stopD > 15) warn.push("Wide stop: the price is " + stopD.toFixed(0) + "% above the Stop Loss (the rule is 15% at most). In tests, skipping wide-stop breakouts raised the average trade from −0.3% to +0.8%; the bot does not signal these.");
+    var p0 = openPrice(r), lvl0 = breakoutLevel(r);
+    if (p0 && lvl0 && closedStatus(r) === "breaking up now" && closedQ(r) === 0 && (todayTier(r) || {}).k !== "signal")
+      warn.push("Skipped at today's open (00:00 UTC): the price was " + ((p0 / lvl0 - 1) * 100).toFixed(1) + "% from the breakout level and " +
+        ((p0 / ((r.up_trigger + r.down_trigger) / 2) - 1) * 100).toFixed(0) + "% above the stop (rules: at most 5% and 15%). The bot decides at the open, so a later move back into range is not a buy." +
+        (Math.abs(livePrice(r) / p0 - 1) > 0.10 ? " Since then the price has moved " + ((livePrice(r) / p0 - 1) * 100).toFixed(0) + "%." : ""));
     if (bfx && !bfx.ok) warn.push("Weak market (BTC below its 20-day average): the bot still buys this signal, but breakouts in a weak market carry more risk. Keep the 1% risk sizing.");
     if (wideSpread(r)) warn.push("No real market: the best sell offer is " + spreadPct(r).toFixed(0) + "% above the best buy offer (the rule is " + MAX_SPREAD_PCT +
       "% at most). An order here would fill far from the shown price; the bot skips these.");
