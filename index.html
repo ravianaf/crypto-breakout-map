@@ -234,7 +234,10 @@ td.r, th.r { text-align: right; }
       <dt>Phase</dt><dd>Bull: price &gt; 50-day avg &gt; 200-day avg, rising. Bear: the mirror image. Sideways: anything else.</dd>
       <dt>Green / red trigger</dt><dd>The 30-day high / low. A daily close beyond it is a breakout / breakdown.</dd>
       <dt>Arrows</dt><dd>▲ now / ▼ now: broke out in the last 2 days. ▲ above / ▼ below: past a trigger today, unconfirmed. ▲ up / ▼ down: the lean.</dd>
-      <dt>Est. breakout period</dt><dd>Middle 50% of when this coin's past quiet stretches ended (yellow band); the wide window covers 80%.</dd>
+      <dt>Est. breakout period</dt><dd>Middle 60% of when coins sitting as far from their nearer trigger as this one (measured in
+        the coin's own daily swings) closed beyond their 30-day range in the past (yellow band); the wide window covers 80%. Since
+        22 Nov 2026; the earlier method (this coin's own quiet stretches) caught about 41% in its middle 50%. Other chart
+        timeframes still use quiet stretches.</dd>
       <dt>Lean</dt><dd>Bull leans up, bear down, sideways follows the half of the range the price is in.</dd>
       <dt>Lists</dt><dd>Today's (buy today / closes tonight? / within 3%), This &amp; Next week's (lean up, trigger within 15%, ≥ $0.1M volume, most likely date that week), Soonest, Yellow zone today, TP1–3 in 24 hours (≥ 40% chance), Top gainers (the 15 biggest 24-hour risers with ≥ $0.1M volume, with
         their type and distance to the trigger; tested 2022–2026, buying after the rise lost money on average, and 25%+ risers, coins deep
@@ -295,6 +298,16 @@ var ENGINE = (function () {
     coin.sma200 = rollingMean(coin.c, 200);
     var m20 = rollingMean(coin.c, 20), s20 = rollingStd(coin.c, 20);
     coin.bw = m20.map(function (m, i) { return 4 * s20[i] / m; });
+    // 2026-11-22: distance from the close to the nearer 30-day trigger, in units of the coin's daily volatility
+    // (20-day std of daily log returns). The breakout window is read from this (see trigWindow).
+    var n = coin.c.length; coin.zt = new Array(n).fill(NaN);
+    for (var t = BOX + 20; t < n; t++) {
+      var hi = -Infinity, lo = Infinity, k, s = 0, s2 = 0;
+      for (k = t - BOX + 1; k <= t; k++) { if (coin.h[k] > hi) hi = coin.h[k]; if (coin.l[k] < lo) lo = coin.l[k]; }
+      for (k = t - 19; k <= t; k++) { var rr = Math.log(coin.c[k] / coin.c[k - 1]); s += rr; s2 += rr * rr; }
+      var vol = Math.sqrt(Math.max(s2 / 20 - (s / 20) * (s / 20), 1e-8));
+      coin.zt[t] = Math.min(Math.log(hi / coin.c[t]), Math.log(coin.c[t] / lo)) / vol;
+    }
     return coin;
   }
   function stretches(ev, upto) {
@@ -311,6 +324,36 @@ var ENGINE = (function () {
     var rem = longer.map(function (g) { return g - q; }).sort(function (a, b) { return a - b; });
     var w = {}; [10, 25, 50, 75, 90].forEach(function (p) { w[p] = pctl(rem, p); });
     return { win: w, src: src };
+  }
+  /* 2026-11-22: breakout window from how far the price sits from its nearer trigger (in daily-volatility units), learned
+     from every coin's past days whose next-60-day outcome was already known: the days until the next daily close beyond
+     the 30-day range, by distance bucket. Checked on local candles (window_feat_run2.js): the middle-60% window caught
+     57.8% (7 starts, 60-90 days ago) and 61.2% (6 unseen earlier starts) at ~25 days wide; the old quiet-stretch window
+     caught 49-50% at that width and 41% for its middle 50%. Breakouts in either direction count. */
+  var Z_EDGES = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4.5, 7], WIN_PCTS = [10, 20, 25, 50, 75, 80, 90];
+  function zBucket(z) { var i = 0; while (i < Z_EDGES.length && z > Z_EDGES[i]) i++; return i; }
+  function trigTable(coins, cut) {
+    var tab = Z_EDGES.map(function () { return []; }).concat([[]]);
+    coins.forEach(function (co) {
+      var upto = co.c.length - 1 - cut;
+      for (var s = BOX + 20; s + BT <= upto; s += 2) {
+        if (!isFinite(co.zt[s])) continue;
+        var T = Infinity; for (var d = s + 1; d <= s + BT; d++) if (co.ev[d]) { T = d - s; break; }
+        tab[zBucket(co.zt[s])].push(T);
+      }
+    });
+    tab.forEach(function (a) { a.sort(function (x, y) { return x - y; }); });
+    return tab;
+  }
+  function trigWindow(coin, t, tab) {
+    var z = coin.zt[t], arr = isFinite(z) && tab ? tab[zBucket(z)] : null;
+    if (!arr || arr.length < 30) return null;
+    var w = {};
+    WIN_PCTS.forEach(function (p) {
+      var v = pctl(arr, p);
+      w[p] = !isFinite(v) ? Infinity : p < 50 ? Math.max(1, Math.floor(v)) : p > 50 ? Math.ceil(v) : Math.max(1, Math.round(v));
+    });
+    return w;
   }
   function moveStats(coin, upto) {
     var h = coin.h, l = coin.l, ev = coin.ev, days = [], hits = 0, n = 0;
@@ -329,7 +372,7 @@ var ENGINE = (function () {
   }
   function utcDate(ms) { return new Date(ms).toISOString().slice(0, 10); }
   function addDays(iso, n) { var d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
-  function analyze(coin, t, poolGaps, poolMove) {
+  function analyze(coin, t, poolGaps, poolMove, trigTab) {
     var c = coin.c, h = coin.h, l = coin.l, s50 = coin.sma50, s200 = coin.sma200;
     var phase = "young", sub = "less than 200 days of history";
     if (!isNaN(s50[t])) {
@@ -346,7 +389,9 @@ var ENGINE = (function () {
     var hist = []; for (k = Math.max(0, t - 365); k <= t; k++) if (!isNaN(coin.bw[k])) hist.push(coin.bw[k]);
     var sq = NaN;
     if (hist.length > 30) { var below = 0; hist.forEach(function (v) { if (v < coin.bw[t]) below++; }); sq = below / hist.length * 100; }
-    var st = stretches(coin.ev, t), wf = windowFor(st.gaps, st.q, poolGaps);
+    var st = stretches(coin.ev, t), tw = trigWindow(coin, t, trigTab),
+      wf = tw ? { win: tw, src: "trigger distance" } : windowFor(st.gaps, st.q, poolGaps);
+    if (wf.win && !tw) { wf.win[20] = wf.win[25]; wf.win[80] = wf.win[75]; }        // fallback: quiet-stretch window
     var bias = phase === "bull" ? "up" : phase === "bear" ? "down" :
       ((c[t] >= (bh + bl) / 2 && (isNaN(s50[t]) || c[t] >= s50[t])) ? "up" : "down");
     var ms = moveStats(coin, t);
@@ -364,7 +409,10 @@ var ENGINE = (function () {
       _win: wf.win
     };
     // Python adds timedelta(days=float), which rounds to whole microseconds before .date() floors it
-    [10, 25, 50, 75, 90].forEach(function (p) { r["bo_p" + p] = wf.win ? addDays(asOf, Math.floor(Math.round(wf.win[p] * 864e8) / 864e8)) : null; });
+    [10, 20, 25, 50, 75, 80, 90].forEach(function (p) {
+      var v = wf.win ? wf.win[p] : null;
+      r["bo_p" + p] = v != null && isFinite(v) ? addDays(asOf, Math.floor(Math.round(v * 864e8) / 864e8)) : null;
+    });
     return r;
   }
   function pools(coins, cut) {
@@ -375,7 +423,7 @@ var ENGINE = (function () {
       gaps = gaps.concat(stretches(co.ev, upto).gaps);
       mv = mv.concat(moveStats(co, upto).days);
     });
-    return { gaps: gaps, mv: mv };
+    return { gaps: gaps, mv: mv, tab: trigTable(coins, cut) };
   }
   // 2026-11-15: scored from several starting days (60, 65, ... 90 days ago), not one, so a single unusual week does not
   // swing the tiles; each start is judged on the BT days that followed it. Misses are split into early / late / none.
@@ -389,7 +437,7 @@ var ENGINE = (function () {
     var P = pools(coins, cut), rows = [];
     coins.forEach(function (co) {
       var n = co.c.length; if (n < BOX + 60 + cut) return;
-      var t0 = n - 1 - cut, p = analyze(co, t0, P.gaps, P.mv); if (!p._win) return;
+      var t0 = n - 1 - cut, p = analyze(co, t0, P.gaps, P.mv, P.tab); if (!p._win) return;
       var after = -1; for (var d = t0 + 1; d <= Math.min(t0 + BT, n - 1); d++) if (co.ev[d]) { after = d; break; }
       var day = after >= 0 ? after - t0 : null, dir = after >= 0 ? (co.ev[after] > 0 ? "up" : "down") : null, hit = null;
       if (dir) {
@@ -401,10 +449,11 @@ var ENGINE = (function () {
       }
       var w = p._win;
       rows.push({ phase: p.phase, bias: p.bias, as_of: p.as_of, day: day, dir: dir,
-        in50: day !== null && w[25] <= day && day <= w[75], in80: day !== null && w[10] <= day && day <= w[90],
+        // 2026-11-22: the main window is the middle 60% (20th-80th percentile)
+        in50: day !== null && w[20] <= day && day <= w[80], in80: day !== null && w[10] <= day && day <= w[90],
         // 2026-11-15: a window that ends after the BT days scored can't be judged yet (no breakout so far is not a miss)
-        done50: w[75] <= BT, done80: w[90] <= BT,
-        early: day !== null && day < w[25], late: day !== null && day > w[75],
+        done50: w[80] <= BT, done80: w[90] <= BT,
+        early: day !== null && day < w[20], late: day !== null && day > w[80],
         dirOk: dir ? dir === p.bias : null, hit: hit });
     });
     return rows;
@@ -429,7 +478,7 @@ var ENGINE = (function () {
   function run(coins, opts) {
     var usable = coins.filter(function (co) { return co.c.length >= BOX + 40; }).map(prepare);
     var P = pools(usable, 0);
-    var rows = usable.map(function (co) { var r = analyze(co, co.c.length - 1, P.gaps, P.mv); delete r._win; return r; });
+    var rows = usable.map(function (co) { var r = analyze(co, co.c.length - 1, P.gaps, P.mv, P.tab); delete r._win; return r; });
     // the 30-minute provisional re-run does not use the accuracy check, so it skips it (it scores 7 starting days)
     return { rows: rows, summary: opts && opts.noBacktest ? null : backtest(usable), coins: usable };
   }
@@ -701,7 +750,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
      days: they are today's levels (the same ones the Telegram bot watches) and must not move intraday. */
   var INTRADAY_MS = 30 * 60 * 1000;
   var PROV_KEYS = ["phase", "phase_detail", "status", "bias", "squeeze_pctile", "days_since_last_breakout", "last_breakout_dir",
-                   "bo_p10", "bo_p25", "bo_p50", "bo_p75", "bo_p90", "window_source", "past_quiet_stretches"];
+                   "bo_p10", "bo_p20", "bo_p25", "bo_p50", "bo_p75", "bo_p80", "bo_p90", "window_source", "past_quiet_stretches"];
   function runIntraday() {
     if (state.busy || state.intradayBusy || !state.coins.length) return;
     state.intradayBusy = true;
@@ -920,7 +969,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   }
   function onThisWeek(r) { return onWatchlist(r, thisWeekRange()); }
   // Soonest est. breakout list: inside the range with a window that has not passed yet, soonest most likely date first
-  function onSoonest(r) { return r.status === "ranging" && !!r.bo_p50 && r.bo_p75 >= new Date().toISOString().slice(0, 10); }
+  function onSoonest(r) { return r.status === "ranging" && !!r.bo_p50 && r.bo_p80 >= new Date().toISOString().slice(0, 10); }
   function onWatchlist(r, range) {
     if (r.status !== "ranging" || r.bias !== "up" || !r.bo_p50) return false;
     var w = range || nextWeekRange(), p = livePrice(r), t = state.tick[r.id];
@@ -928,7 +977,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     var gap = r.up_trigger / p - 1;
     return gap >= 0 && gap <= 0.15 && ((t && t.vol) || 0) >= 1e5 && !/^(WBTC|STETH|WETH)$/.test(r.base);
   }
-  function enteredYellow(r) { return r.status === "ranging" && r.bo_p25 === new Date().toISOString().slice(0, 10); }
+  function enteredYellow(r) { return r.status === "ranging" && r.bo_p20 === new Date().toISOString().slice(0, 10); }
   function redReclaim(r) {
     var co = state.coinBy && state.coinBy[r.symbol]; if (!co || co.c.length < 40) return null;
     var k = co.c.length - 1;
@@ -941,9 +990,9 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   // days until the estimated breakout window (darker yellow band) opens: 0 inside it; coins breaking out now or
   // without a window go last
   function yellowDays(r) {
-    if (r.status !== "ranging" || !r.bo_p25) return 1e6;
+    if (r.status !== "ranging" || !r.bo_p20) return 1e6;
     var today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
-    var a = (Date.parse(r.bo_p25 + "T00:00:00Z") - today) / DAYMS, b = (Date.parse(r.bo_p75 + "T00:00:00Z") - today) / DAYMS;
+    var a = (Date.parse(r.bo_p20 + "T00:00:00Z") - today) / DAYMS, b = (Date.parse(r.bo_p80 + "T00:00:00Z") - today) / DAYMS;
     return a > 0 ? a : b >= 0 ? 0 : 1e5;                     // window already over: after the others
   }
   function btcFilter() {
@@ -1008,8 +1057,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
         " to " + fmtDY(s.as_of) + ", each time using only data up to that day, and scored against what the coins did in the 60 days after (" +
         s.coins_scored + " coin forecasts). Recalculated each day from live data.";
       var tiles = [
-        [pct(s.in_p25_p75_pct), "breakouts landed inside the middle-50% date window",
-          "a well-calibrated 50% window should score about 50% · misses: " + pct(s.early_pct) + " came earlier, " + pct(s.late_pct) +
+        [pct(s.in_p25_p75_pct), "breakouts landed inside the middle-60% date window",
+          "a well-calibrated 60% window should score about 60% · misses: " + pct(s.early_pct) + " came earlier, " + pct(s.late_pct) +
           " later, " + pct(s.none_pct) + " no breakout within 60 days"],
         [pct(s.in_p10_p90_pct), "landed inside the wide (middle-80%) window", "should score about 80% · " + s.n80 + " coins whose window has passed"],
         [pct(s.dir_correct_pct), "direction calls were right", "a coin flip scores 50%" + (s.dir_correct_by_phase.bull != null ? "; bull-phase calls " + pct(s.dir_correct_by_phase.bull) : "")],
@@ -1057,8 +1106,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   function nextCell(r) {
     var fl = $("flist").value, ls = liveStatus(r), td = fl === "today" ? todayTier(r) : null;
     if (fl === "yellow" && enteredYellow(r))
-      return '<span class="arrow-' + r.bias + '" title="Breakout window ' + fmtRange(r.bo_p25, r.bo_p75) + '. Buy only on a daily close above ' + fmtP(r.up_trigger) +
-        '">📅 lean ' + (r.bias === "up" ? "▲" : "▼") + " · to " + fmtD(r.bo_p75) + "</span>";
+      return '<span class="arrow-' + r.bias + '" title="Breakout window ' + fmtRange(r.bo_p20, r.bo_p80) + '. Buy only on a daily close above ' + fmtP(r.up_trigger) +
+        '">📅 lean ' + (r.bias === "up" ? "▲" : "▼") + " · to " + fmtD(r.bo_p80) + "</span>";
     if (fl === "gainers" && gainerRank(r)) { var gi = gainerInfo(r);
       return '<span class="arrow-' + (gi.kind === "above the trigger" ? "up" : "side") + '" title="' + esc("24 h +" + gi.chg.toFixed(0) + "% on $" +
         (gi.vol / 1e6).toFixed(1) + "M traded. " + gi.kind + (gi.kind.indexOf("new") ? ", " + (gi.dist >= 0 ? "+" : "") + gi.dist.toFixed(0) +
@@ -1066,17 +1115,17 @@ if (typeof module !== "undefined") module.exports = ENGINE;
         gi.chg.toFixed(0) + "% · " + esc(gi.kind) + (gi.kind.indexOf("new") ? " " + (gi.dist >= 0 ? "+" : "") + gi.dist.toFixed(0) + "%" : "") + "</span>"; }
     var fsv = $("fstatus").value, srt = $("sort").value;
     if ((fl === "nextweek" && onWatchlist(r)) || (fl === "thisweek" && onThisWeek(r)))
-      return '<span class="arrow-up" title="Most likely breakout ' + fmtD(r.bo_p50) + " (window " + fmtRange(r.bo_p25, r.bo_p75) + "). Green trigger " + fmtP(r.up_trigger) +
+      return '<span class="arrow-up" title="Most likely breakout ' + fmtD(r.bo_p50) + " (window " + fmtRange(r.bo_p20, r.bo_p80) + "). Green trigger " + fmtP(r.up_trigger) +
         ", " + ((r.up_trigger / livePrice(r) - 1) * 100).toFixed(1) + "% above now. Est. profit = trigger to target if it breaks up. Buy only on a daily close above the trigger.\">📅 " +
         fmtD(r.bo_p50) + " · +" + ((r.up_target / r.up_trigger - 1) * 100).toFixed(1) + "%</span>";
     if (fl === "soonest" && onSoonest(r)) { var sd = yellowDays(r);
-      return '<span class="arrow-' + r.bias + '" title="Most likely breakout ' + fmtD(r.bo_p50) + " (window " + fmtRange(r.bo_p25, r.bo_p75) +
+      return '<span class="arrow-' + r.bias + '" title="Most likely breakout ' + fmtD(r.bo_p50) + " (window " + fmtRange(r.bo_p20, r.bo_p80) +
         '). Timing only: the window does not say which way.">📅 ' + fmtD(r.bo_p50) + " · lean " + (r.bias === "up" ? "▲" : "▼") + (sd === 0 ? " · in zone" : "") + "</span>"; }
     if (!fl && !fsv && srt === "green") { var gd = (r.up_trigger / livePrice(r) - 1) * 100;
       return gd >= 0 ? '<span class="arrow-up" title="Green trigger ' + fmtP(r.up_trigger) + '">▲ ' + gd.toFixed(1) + "% to go</span>"
                      : '<span class="arrow-up">▲ above</span>'; }
     if (!fl && !fsv && srt === "yellow") { var yd = yellowDays(r);
-      if (yd < 1e5) return '<span class="arrow-' + r.bias + '" title="Window ' + fmtRange(r.bo_p25, r.bo_p75) + '">📅 ' + (yd === 0 ? "in zone" : "in " + Math.round(yd) + " d") + "</span>"; }
+      if (yd < 1e5) return '<span class="arrow-' + r.bias + '" title="Window ' + fmtRange(r.bo_p20, r.bo_p80) + '">📅 ' + (yd === 0 ? "in zone" : "in " + Math.round(yd) + " d") + "</span>"; }
     if (fl === "reclaim") { var rc = redReclaim(r);
       if (rc) return '<span class="arrow-up" title="Closed below its 30-day low ' + fmtP(rc.level) + " " + rc.daysAgo + ' day(s) ago and closed back above it. Tested on all coins: no rally on average (14-day return -1.6% vs -0.7% for any day).">🔄 back above ' + fmtP(rc.level) + "</span>"; }
     if (fl === "t2day" || fl === "t3day") { var tcn = tpChance(r, +fl[1]);
@@ -1129,7 +1178,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     $("shown").textContent = list.length + " of " + state.rows.length + " coins";
     $("tbody").innerHTML = list.map(function (r) {
       var next = nextCell(r);
-      var when = r.status !== "ranging" ? "now" : fmtRange(r.bo_p25, r.bo_p75);
+      var when = r.status !== "ranging" ? "now" : fmtRange(r.bo_p20, r.bo_p80);
       return '<tr class="row' + (state.sel === r.symbol ? " sel" : "") + '" data-s="' + esc(r.symbol) + '" tabindex="0"><td><b>' + esc(r.base) +
         '</b>' + (GOLD_BASES[r.base] ? ' <small class="goldtag" title="Gold-backed token: tracks the gold price (XAU/USD)">gold · XAU/USD</small>' : "") +
         '</td><td class="r num">' + fmtP(livePrice(r)) + '</td><td><span class="pill ' + r.phase + '">' + r.phase +
@@ -1378,7 +1427,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     }
     if (r.status !== "ranging") return base + " closed beyond its 30-day range in the last two days (" + r.status.replace("breaking ", "") + "). Watch whether the next daily closes hold beyond " + fmtP(r.status.indexOf("up") >= 0 ? r.up_trigger : r.down_trigger) + "; a close back inside the range would make it a false breakout.";
     var side = r.bias === "up" ? "a daily close above " + fmtP(r.up_trigger) : "a daily close below " + fmtP(r.down_trigger);
-    return base + " is in a " + r.phase + " phase and has gone " + r.days_since_last_breakout + " days without a breakout. Its history puts the next one most likely between " + fmtDY(r.bo_p25) + " and " + fmtDY(r.bo_p75) + ". The lean is " + r.bias + ", so the signal to watch for is " + side + ". Either trigger can fire; set alerts on both. Window based on " + (r.window_source === "coin" ? "this coin's own history." : "all coins' history, because this coin has too little.");
+    return base + " is in a " + r.phase + " phase and has gone " + r.days_since_last_breakout + " days without a breakout. Coins as far from their trigger as this one most often broke out between " + fmtDY(r.bo_p20) + " and " + fmtDY(r.bo_p80) + " (6 in 10 did). The lean is " + r.bias + ", so the signal to watch for is " + side + ". Either trigger can fire; set alerts on both. Window based on " + (r.window_source === "trigger distance" ? "how far the price sits from its nearer trigger, measured in its own daily swings, across all coins' history." : r.window_source === "coin" ? "this coin's own history." : "all coins' history, because this coin has too little.");
   }
   /* ---------- chart timeframes: analysis is daily; other timeframes are for viewing ---------- */
   var TFS = ["15m", "1h", "4h", "1D", "1W"];
@@ -1511,12 +1560,12 @@ if (typeof module !== "undefined") module.exports = ENGINE;
       var longer = P.gaps.filter(function (g) { return g > q; });
       if (longer.length >= 5) {
         var rem = longer.map(function (g) { return g - q; });   // already sorted
-        win = {}; [10, 25, 50, 75, 90].forEach(function (pc) { win[pc] = barAt + Math.round(qtl(rem, pc)) * sec; });
+        win = {}; [10, 20, 25, 50, 75, 80, 90].forEach(function (pc) { win[pc] = barAt + Math.round(qtl(rem, pc)) * sec; });
       } else src = "insufficient";
     }
     var mvS = P.mv.slice().sort(function (x, y) { return x - y; }), mvBars = mvS.length >= 3 ? qtl(mvS, 50) : NaN;
     var out = Object.assign({}, r, { modeTf: tf, up_trigger: hi, down_trigger: lo, up_target: hi * hi / lo, down_target: lo * lo / hi,
-      status: status, bo_p10: null, bo_p25: null, bo_p50: null, bo_p75: null, bo_p90: null, days_to_target_median: NaN,
+      status: status, bo_p10: null, bo_p20: null, bo_p25: null, bo_p50: null, bo_p75: null, bo_p80: null, bo_p90: null, days_to_target_median: NaN,
       barAt: barAt, winTs: win, winSrc: src, barsSince: q, sinceText: fmtDur(q * sec), mvSec: Math.round(mvBars) * sec, poolN: P.n });
     state.viewCache = {}; state.viewCache[ck] = out;
     return out;
@@ -1685,8 +1734,8 @@ if (typeof module !== "undefined") module.exports = ENGINE;
     }
     if (!now && estTs(r, 10) && estTs(r, 90) <= t1 && estTs(r, 10) >= t0) {
       el("rect", { x: x(estTs(r, 10)), y: m.t, width: Math.max(1, x(estTs(r, 90)) - x(estTs(r, 10))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.08 });
-      el("rect", { x: x(estTs(r, 25)), y: m.t, width: Math.max(2, x(estTs(r, 75)) - x(estTs(r, 25))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.22 });
-      var wl = x(estTs(r, 25)) + 4, wlab = "est. breakout " + (r.modeTf ? estRange(r, 25, 75) : fmtRange(r.bo_p25, r.bo_p75));
+      el("rect", { x: x(estTs(r, 20)), y: m.t, width: Math.max(2, x(estTs(r, 80)) - x(estTs(r, 20))), height: pBot - m.t, fill: css("--window"), "fill-opacity": 0.22 });
+      var wl = x(estTs(r, 20)) + 4, wlab = "est. breakout " + (r.modeTf ? estRange(r, 20, 80) : fmtRange(r.bo_p20, r.bo_p80));
       txt(wlab, { x: Math.min(wl, W - m.r - 4), y: pBot - 6, fill: css("--ink-2"), "text-anchor": wl > W - m.r - wlab.length * 7 ? "end" : "start" });
     }
     el("line", { x1: x(tLast), x2: x(tLast), y1: m.t, y2: H - m.b, stroke: css("--ink-3"), "stroke-dasharray": "2 3" });
@@ -1787,7 +1836,7 @@ if (typeof module !== "undefined") module.exports = ENGINE;
   }
 
   function copyCsv() {
-    var cols = ["symbol", "price", "phase", "status", "bias", "up_trigger", "down_trigger", "up_target", "down_target", "bo_p25", "bo_p50", "bo_p75", "days_since_last_breakout", "market_cap"];
+    var cols = ["symbol", "price", "phase", "status", "bias", "up_trigger", "down_trigger", "up_target", "down_target", "bo_p20", "bo_p50", "bo_p80", "days_since_last_breakout", "market_cap"];
     var lines = [cols.join(",")].concat(filtered().map(function (r) {
       var cap = matchCap(r);
       return cols.map(function (k) { var v = k === "price" ? livePrice(r) : k === "market_cap" ? (cap && cap.mc) : r[k]; return v == null ? "" : String(v); }).join(",");
